@@ -39,30 +39,18 @@ enum AppModelContainer {
 }
 
 struct RootView: View {
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        ZStack {
-            if hasCompletedOnboarding {
-                GalleryView()
-                    .transition(.opacity)
-            } else {
-                OnboardingView {
-                    withAnimation(Theme.spring) { hasCompletedOnboarding = true }
-                }
-                .transition(.opacity)
+        GalleryView()
+            .task {
+                coordinator.resume()
+                // Create the invisible anonymous account early so the first generation is instant.
+                if AppConfig.isConfigured { _ = try? await AnonymousAuth.userId() }
             }
-        }
-        .task {
-            Haptics.prepare()
-            coordinator.resume()
-            // Create the invisible anonymous account early so the first generation is instant.
-            if AppConfig.isConfigured { _ = try? await AnonymousAuth.userId() }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await coordinator.refreshNow() } }
-        }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await coordinator.refreshNow() } }
+            }
     }
 }

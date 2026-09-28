@@ -54,7 +54,7 @@ struct DesignImage: View {
                     .aspectRatio(contentMode: contentMode)
                     .transition(.opacity)
             } else {
-                Rectangle().fill(Theme.placeholderGradient)
+                Rectangle().fill(.quaternary)
             }
         }
         .task(id: Self.key(design, kind, maxPixelSize)) { await load() }

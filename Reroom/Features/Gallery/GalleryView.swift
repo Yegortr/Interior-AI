@@ -1,11 +1,14 @@
 import SwiftData
 import SwiftUI
 
+/// Home: a Photos-style grid of designs. Creating starts from the "+" menu (or the empty state),
+/// filters and layout live in a toolbar menu, settings in a sheet.
 struct GalleryView: View {
     @Query(sort: \Design.createdAt, order: .reverse) private var designs: [Design]
     @Environment(GenerationCoordinator.self) private var coordinator
-
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("gallery.columnCount") private var columnCount = 2
+
     @State private var filter: Filter = .all
     @State private var creating: DesignKind?
     @State private var showSettings = false
@@ -13,8 +16,17 @@ struct GalleryView: View {
     @Namespace private var zoom
 
     enum Filter: String, CaseIterable, Identifiable {
-        case all = "All", rooms = "Rooms", gardens = "Gardens", favorites = "Favorites"
+        case all = "All Designs", rooms = "Rooms", gardens = "Gardens", favorites = "Favorites"
         var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .all: "square.grid.2x2"
+            case .rooms: "sofa"
+            case .gardens: "leaf"
+            case .favorites: "heart"
+            }
+        }
     }
 
     private var visible: [Design] {
@@ -28,48 +40,17 @@ struct GalleryView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 12) {
-                        StartCard(kind: .interior) { start(.interior) }
-                        StartCard(kind: .garden) { start(.garden) }
-                    }
-                    .padding(.horizontal, Theme.horizontalPadding)
-
-                    if !designs.isEmpty {
-                        filterBar
-                    }
-                }
-                .padding(.top, 4)
-
+            Group {
                 if visible.isEmpty {
                     emptyState
                 } else {
-                    grid
-                        .padding(.horizontal, columnCount == 2 ? Theme.gridSpacing : Theme.horizontalPadding)
-                        .padding(.top, 8)
-                        .padding(.bottom, 24)
-                }
-            }
-            .navigationTitle("Reroom")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Settings")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Layout", selection: $columnCount.animation(Theme.spring)) {
-                            Label("Grid", systemImage: "square.grid.2x2").tag(2)
-                            Label("List", systemImage: "rectangle.grid.1x2").tag(1)
-                        }
-                    } label: {
-                        Image(systemName: columnCount == 2 ? "square.grid.2x2" : "rectangle.grid.1x2")
-                            .contentTransition(.symbolEffect(.replace))
+                    ScrollView {
+                        grid
                     }
-                    .accessibilityLabel("Layout")
                 }
             }
+            .navigationTitle(filter == .all ? "Reroom" : filter.rawValue)
+            .toolbar { toolbar }
             .navigationDestination(for: Design.self) { design in
                 DesignDetailView(design: design)
                     .navigationTransition(.zoom(sourceID: design.id, in: zoom))
@@ -80,10 +61,12 @@ struct GalleryView: View {
                 case .garden: GardenFlowView()
                 }
             }
-            .sensoryFeedback(.selection, trigger: filter)
-            .sensoryFeedback(.selection, trigger: columnCount)
             .sheet(isPresented: $showSettings) {
                 SettingsView()
+            }
+            .sheet(isPresented: Binding(get: { !hasCompletedOnboarding }, set: { _ in })) {
+                OnboardingView { hasCompletedOnboarding = true }
+                    .interactiveDismissDisabled()
             }
             .confirmationDialog(
                 "Delete this design?",
@@ -91,29 +74,36 @@ struct GalleryView: View {
                 titleVisibility: .visible,
                 presenting: designToDelete
             ) { design in
-                Button("Delete", role: .destructive) {
-                    withAnimation(Theme.spring) { coordinator.delete(design) }
+                Button("Delete Design", role: .destructive) {
+                    withAnimation(.smooth) { coordinator.delete(design) }
                     designToDelete = nil
                 }
+            } message: { _ in
+                Text("It will be removed from all your devices.")
             }
+            .sensoryFeedback(.selection, trigger: filter)
+            .sensoryFeedback(.selection, trigger: columnCount)
+            // A new design appearing = a generation just started.
+            .sensoryFeedback(.success, trigger: designs.count) { old, new in new > old }
         }
     }
+
+    // MARK: Grid
 
     @ViewBuilder
     private var grid: some View {
         if columnCount == 2 {
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: Theme.gridSpacing), GridItem(.flexible(), spacing: Theme.gridSpacing)],
-                spacing: Theme.gridSpacing
-            ) {
+            // Photos-style: edge to edge, hairline gutters.
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)], spacing: 2) {
                 ForEach(visible) { cell($0, columns: 2) }
             }
-            .animation(Theme.spring, value: visible.map(\.id))
+            .animation(.smooth, value: visible.map(\.id))
         } else {
-            LazyVStack(spacing: 14) {
+            LazyVStack(spacing: 16) {
                 ForEach(visible) { cell($0, columns: 1) }
             }
-            .animation(Theme.spring, value: visible.map(\.id))
+            .padding(.horizontal)
+            .animation(.smooth, value: visible.map(\.id))
         }
     }
 
@@ -128,8 +118,8 @@ struct GalleryView: View {
                 design.isFavorite.toggle()
             } label: {
                 design.isFavorite
-                    ? Label("Remove from Favorites", systemImage: "heart.slash")
-                    : Label("Add to Favorites", systemImage: "heart")
+                    ? Label("Unfavorite", systemImage: "heart.slash")
+                    : Label("Favorite", systemImage: "heart")
             }
             if design.isRetryable {
                 Button {
@@ -138,90 +128,88 @@ struct GalleryView: View {
                     Label("Try Again", systemImage: "arrow.clockwise")
                 }
             }
+            Divider()
             Button(role: .destructive) {
                 designToDelete = design
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+        } preview: {
+            DesignCard(design: design, columns: 1)
+                .frame(width: 300)
         }
-        .transition(.scale(scale: 0.96).combined(with: .opacity))
     }
 
-    private var filterBar: some View {
-        Picker("Show", selection: $filter) {
-            ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Picker("Show", selection: $filter.animation(.smooth)) {
+                    ForEach(Filter.allCases) { Label($0.rawValue, systemImage: $0.symbol).tag($0) }
+                }
+                Section("View As") {
+                    Picker("View As", selection: $columnCount.animation(.smooth)) {
+                        Label("Grid", systemImage: "square.grid.2x2").tag(2)
+                        Label("List", systemImage: "rectangle.grid.1x2").tag(1)
+                    }
+                }
+                Divider()
+                Button {
+                    showSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+            } label: {
+                Image(systemName: filter == .all ? "ellipsis.circle" : "line.3.horizontal.decrease.circle.fill")
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .accessibilityLabel("Options")
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, Theme.horizontalPadding)
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button { creating = .interior } label: { Label("Redesign a Room", systemImage: "sofa") }
+                Button { creating = .garden } label: { Label("Design a Garden", systemImage: "leaf") }
+            } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("New Design")
+        }
     }
 
-    private func start(_ kind: DesignKind) {
-        creating = kind
-    }
+    // MARK: Empty state
 
+    @ViewBuilder
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label(filter == .favorites ? "No favorites yet" : "Your designs appear here",
-                  systemImage: filter == .favorites ? "heart" : "sparkles")
-        } description: {
-            Text(filter == .favorites
-                 ? "Tap the heart on a design to keep it here."
-                 : "Take a photo of a room or garden, pick a style, and see it transformed.")
+        if filter == .all {
+            ContentUnavailableView {
+                Label("Redesign Your Space", systemImage: "wand.and.sparkles")
+                    .symbolEffect(.breathe)
+            } description: {
+                Text("Take a photo of a room or garden, pick a style, and see it transformed.")
+            } actions: {
+                Button { creating = .interior } label: {
+                    Label("Redesign a Room", systemImage: "sofa")
+                }
+                .buttonStyle(.borderedProminent)
+                Button { creating = .garden } label: {
+                    Label("Design a Garden", systemImage: "leaf")
+                }
+                .buttonStyle(.bordered)
+            }
+        } else {
+            ContentUnavailableView {
+                Label("No \(filter.rawValue)", systemImage: filter.symbol)
+            } description: {
+                Text(filter == .favorites ? "Designs you favorite appear here." : "Nothing here yet.")
+            } actions: {
+                Button("Show All Designs") { filter = .all }
+            }
         }
-        .padding(.top, 24)
     }
 }
 
 extension DesignKind: Identifiable {
     var id: String { rawValue }
-}
-
-/// Big entry card on the home screen (Realtor.com / IKEA-style "add a photo to redesign").
-private struct StartCard: View {
-    let kind: DesignKind
-    let action: () -> Void
-
-    @State private var taps = 0
-
-    private var colors: [Color] {
-        kind == .interior
-            ? [Color(hex: "#E9DFD3") ?? .brown, Color(hex: "#B08B6E") ?? .brown]
-            : [Color(hex: "#DCEBD0") ?? .green, Color(hex: "#5E8C4A") ?? .green]
-    }
-
-    var body: some View {
-        Button {
-            taps += 1
-            action()
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: kind == .interior ? "sofa.fill" : "leaf.fill")
-                    .symbolEffect(.bounce, value: taps)
-                    .font(.title)
-                    .foregroundStyle(.white)
-                    .frame(width: 52, height: 52)
-                    .background(Circle().fill(.white.opacity(0.25)))
-                Spacer(minLength: 12)
-                Text(kind == .interior ? "Redesign\na room" : "Design\na garden")
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                Label("Add photo", systemImage: "camera.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(.white.opacity(0.25)))
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
-            .background(
-                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .sensoryFeedback(.impact(weight: .medium), trigger: taps)
-        .accessibilityLabel(kind == .interior ? "Redesign a room" : "Design a garden")
-    }
 }

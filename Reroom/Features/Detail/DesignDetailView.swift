@@ -315,8 +315,7 @@ struct MakeChangesSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
                         coordinator.makeChanges(from: design, change: change)
-                        Haptics.success()
-                        dismiss()
+                                        dismiss()
                         onSubmitted()
                     }
                     .fontWeight(.semibold)

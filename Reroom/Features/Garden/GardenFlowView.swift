@@ -174,7 +174,6 @@ struct GardenFlowView: View {
             notes: notes
         )
         coordinator.createGarden(context, photo: photo.prepared)
-        Haptics.success()
         dismiss()
     }
 }

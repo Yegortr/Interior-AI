@@ -45,15 +45,11 @@ struct BeforeAfterSlider: View {
                     .shadow(color: .black.opacity(0.35), radius: 3)
                     .offset(x: dividerX - 1.5)
 
-                Circle()
-                    .fill(.white)
+                Image(systemName: "arrow.left.and.right")
+                    .font(.footnote.weight(.bold))
                     .frame(width: 40, height: 40)
-                    .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
-                    .overlay(
-                        Image(systemName: "arrow.left.and.right")
-                            .font(.footnote.weight(.bold))
-                            .foregroundStyle(.black)
-                    )
+                    .background(.regularMaterial, in: Circle())
+                    .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
                     .offset(x: dividerX - 20)
             }
             .contentShape(Rectangle())
@@ -66,19 +62,18 @@ struct BeforeAfterSlider: View {
                         }
                         guard axis == .horizontal, width > 0 else { return }
                         let newPosition = min(max(dragStartPosition + value.translation.width / width, 0), 1)
-                        if (newPosition == 0 || newPosition == 1), newPosition != position { Haptics.tap() }
                         position = newPosition
                     }
                     .onEnded { _ in axis = nil }
             )
             .onTapGesture(count: 1, coordinateSpace: .local) { location in
                 guard width > 0 else { return }
-                Haptics.tap()
-                withAnimation(Theme.spring) { position = min(max(location.x / width, 0), 1) }
+                withAnimation(.snappy) { position = min(max(location.x / width, 0), 1) }
             }
         }
         .aspectRatio(aspectRatio, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .sensoryFeedback(.impact(weight: .light), trigger: position == 0 || position == 1) { _, atEdge in atEdge }
         .accessibilityElement()
         .accessibilityLabel("Before and after comparison")
         .accessibilityValue("\(Int(position * 100)) percent original")
@@ -93,11 +88,10 @@ struct BeforeAfterSlider: View {
 
     private func label(_ text: String) -> some View {
         Text(text)
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.white)
+            .font(.caption.weight(.semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(.black.opacity(0.4), in: Capsule())
+            .background(.thinMaterial, in: Capsule())
             .padding(10)
     }
 }

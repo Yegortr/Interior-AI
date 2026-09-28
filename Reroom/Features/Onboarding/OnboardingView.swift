@@ -1,72 +1,82 @@
 import SwiftUI
 
+/// Apple-style welcome sheet (like the first launch of Freeform or Journal): a title, three
+/// feature rows with SF Symbols, and one Continue button. Shown once, over the gallery.
 struct OnboardingView: View {
     let onFinish: () -> Void
 
-    @State private var page = 0
+    @State private var appeared = false
 
-    private struct Page {
+    private struct Feature: Identifiable {
         let symbol: String
+        let color: Color
         let title: String
         let text: String
+        var id: String { title }
     }
 
-    private let pages = [
-        Page(symbol: "camera.viewfinder", title: "Snap your space", text: "Take a photo of any room, balcony, yard or garden."),
-        Page(symbol: "leaf", title: "Plants for your climate", text: "For gardens we pick plants that thrive where you live — with care tips for each."),
-        Page(symbol: "sparkles", title: "See it redesigned", text: "Get a photorealistic redesign in seconds. Compare before and after, then refine it."),
+    private let features = [
+        Feature(symbol: "camera.viewfinder", color: .blue, title: "Snap Your Space",
+                text: "Take a photo of any room, balcony, yard or garden."),
+        Feature(symbol: "wand.and.sparkles", color: .purple, title: "Pick a Style",
+                text: "See it redesigned in seconds, then refine it with Make Changes."),
+        Feature(symbol: "leaf.fill", color: .green, title: "Plants for Your Climate",
+                text: "For gardens, get plants that thrive where you live, with care tips."),
     ]
 
     var body: some View {
-        VStack(spacing: 24) {
-            TabView(selection: $page) {
-                ForEach(pages.indices, id: \.self) { index in
-                    let item = pages[index]
-                    VStack(spacing: 24) {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 72, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 180, height: 180)
-                            .background(Circle().fill(Color.accentColor.opacity(0.12)))
-                            .symbolEffect(.bounce, value: page == index)
-                            .symbolEffect(.breathe)
-                        VStack(spacing: 10) {
-                            Text(item.title).font(.largeTitle.bold())
-                            Text(item.text)
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 32)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 40) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "sofa.fill")
+                            .font(.system(size: 64))
+                            .foregroundStyle(.tint)
+                            .symbolEffect(.bounce, value: appeared)
+                        Text("Welcome to Reroom")
+                            .font(.largeTitle.bold())
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 48)
+
+                    VStack(alignment: .leading, spacing: 28) {
+                        ForEach(Array(features.enumerated()), id: \.element.id) { index, feature in
+                            HStack(alignment: .top, spacing: 16) {
+                                Image(systemName: feature.symbol)
+                                    .font(.title)
+                                    .foregroundStyle(feature.color)
+                                    .frame(width: 44)
+                                    .symbolEffect(.bounce, value: appeared)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(feature.title).font(.headline)
+                                    Text(feature.text).font(.subheadline).foregroundStyle(.secondary)
+                                }
+                            }
+                            .opacity(appeared ? 1 : 0)
+                            .offset(y: appeared ? 0 : 12)
+                            .animation(.smooth.delay(0.1 * Double(index + 1)), value: appeared)
                         }
                     }
-                    .tag(index)
+                    .padding(.horizontal, 32)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .indexViewStyle(.page(backgroundDisplayMode: .always))
-            .sensoryFeedback(.selection, trigger: page)
 
-            Button {
-                if page < pages.count - 1 {
-                    withAnimation(Theme.spring) { page += 1 }
-                } else {
-                    onFinish()
+            VStack(spacing: 12) {
+                Text("No account needed. Your designs stay on your devices and in your iCloud.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button(action: onFinish) {
+                    Text("Continue")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
                 }
-            } label: {
-                Text(page < pages.count - 1 ? "Continue" : "Get Started")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .contentTransition(.numericText())
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .controlSize(.large)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 24)
         }
-        .background(
-            LinearGradient(colors: [Color.accentColor.opacity(0.15), Color(.systemBackground)], startPoint: .top, endPoint: .center)
-                .ignoresSafeArea()
-        )
+        .onAppear { appeared = true }
     }
 }

@@ -7,10 +7,9 @@ struct DesignCard: View {
     let design: Design
     let columns: Int
 
-    @Environment(GenerationCoordinator.self) private var coordinator
-
     private var isCompact: Bool { columns == 2 }
     private var ratio: CGFloat { isCompact ? AspectRatio.gridCard.value : design.aspectRatio.value }
+    private var cornerRadius: CGFloat { isCompact ? 0 : 12 }
 
     var body: some View {
         Color.clear
@@ -22,49 +21,31 @@ struct DesignCard: View {
                     pending
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
-            .overlay(alignment: .topLeading) {
-                if design.kind == .garden {
-                    Image(systemName: "leaf.fill")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(7)
-                        .background(Color.green.opacity(0.75), in: Circle())
-                        .padding(8)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if design.isFavorite {
-                    Image(systemName: "heart.fill")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(7)
-                        .background(.black.opacity(0.35), in: Circle())
-                        .padding(8)
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(alignment: .bottomLeading) {
-                if design.status == .completed, !isCompact {
-                    Text("\(design.styleTitle) · \(design.subjectTitle)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.black.opacity(0.35), in: Capsule())
-                        .padding(10)
+                // Photos-style glyphs: small, white, shadowed — no chips.
+                HStack(spacing: 6) {
+                    if design.isFavorite { Image(systemName: "heart.fill") }
+                    if design.kind == .garden { Image(systemName: "leaf.fill") }
                 }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.5), radius: 2)
+                .padding(8)
+                .opacity(design.status == .completed ? 1 : 0)
             }
-            .animation(Theme.spring, value: design.statusRaw)
+            .animation(.smooth, value: design.statusRaw)
+            .animation(.smooth, value: design.isFavorite)
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(design.styleTitle) \(design.subjectTitle)")
+            .accessibilityAddTraits(.isButton)
     }
 
     private var pending: some View {
         ZStack {
             DesignImage(design: design, kind: .original, maxPixelSize: 400)
                 .blur(radius: 14)
-                .opacity(0.45)
             Rectangle().fill(.ultraThinMaterial)
             PendingStatusView(design: design, compact: isCompact)
                 .padding(isCompact ? 10 : 20)
@@ -87,11 +68,10 @@ struct PendingStatusView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(compact ? 3 : 4)
             if design.status.isInProgress {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(Self.elapsed(context.date.timeIntervalSince(design.submittedAt ?? design.createdAt)))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+                // System-driven timer text: no manual ticking.
+                Text(design.submittedAt ?? design.createdAt, style: .timer)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
             if design.isRetryable {
                 Button {
@@ -151,10 +131,5 @@ struct PendingStatusView: View {
         case .failed: design.errorMessage ?? "Something went wrong"
         case .completed: ""
         }
-    }
-
-    static func elapsed(_ interval: TimeInterval) -> String {
-        let seconds = max(0, Int(interval))
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }

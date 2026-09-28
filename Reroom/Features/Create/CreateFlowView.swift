@@ -104,7 +104,6 @@ struct CreateFlowView: View {
     private func generate() {
         guard let photo else { return }
         coordinator.create(roomType: roomType, style: style, notes: notes, photo: photo.prepared)
-        Haptics.success()
         dismiss()
     }
 }
