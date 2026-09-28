@@ -1,3 +1,4 @@
+import QuickLook
 import SwiftUI
 
 struct DesignDetailView: View {
@@ -5,12 +6,13 @@ struct DesignDetailView: View {
 
     @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
-    @Namespace private var heroNamespace
 
     @State private var mode: Mode = .design
     @State private var result: UIImage?
     @State private var original: UIImage?
-    @State private var showFullscreen = false
+    /// Quick Look: the system full-screen viewer used by Photos and Files.
+    @State private var previewURL: URL?
+    @State private var previewItems: [URL] = []
     @State private var showMakeChanges = false
     @State private var confirmDelete = false
     @State private var saveState: SaveState = .idle
@@ -85,12 +87,7 @@ struct DesignDetailView: View {
         .sheet(isPresented: $showMakeChanges) {
             MakeChangesSheet(design: design) { dismiss() }
         }
-        .fullScreenCover(isPresented: $showFullscreen) {
-            if let result {
-                FullscreenViewer(after: result, before: original)
-                    .navigationTransition(.zoom(sourceID: "hero", in: heroNamespace))
-            }
-        }
+        .quickLookPreview($previewURL, in: previewItems)
         .sensoryFeedback(.selection, trigger: mode)
         .sensoryFeedback(.impact(weight: .medium), trigger: design.isFavorite)
         .sensoryFeedback(.success, trigger: saveState) { _, new in new == .saved }
@@ -119,7 +116,7 @@ struct DesignDetailView: View {
                 .transition(.opacity)
         } else {
             Button {
-                showFullscreen = true
+                openPreview()
             } label: {
                 Color.clear
                     .aspectRatio(design.aspectRatio.value, contentMode: .fit)
@@ -134,7 +131,6 @@ struct DesignDetailView: View {
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .matchedTransitionSource(id: "hero", in: heroNamespace)
             .accessibilityLabel("Open full screen")
             .transition(.opacity)
         }
@@ -189,8 +185,8 @@ struct DesignDetailView: View {
                 if design.isRetryable {
                     Button { coordinator.retry(design) } label: { Label("Try Again", systemImage: "arrow.clockwise") }
                 }
-                if result != nil {
-                    Button { showFullscreen = true } label: { Label("View Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") }
+                if design.resultImageData != nil {
+                    Button { openPreview() } label: { Label("View Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") }
                 }
                 Button(role: .destructive) { confirmDelete = true } label: { Label("Delete", systemImage: "trash") }
             } label: {
@@ -250,6 +246,24 @@ struct DesignDetailView: View {
         if let data = design.originalImageData {
             original = await LocalImageCache.shared.image(key: "\(design.id)-original-full", data: data, maxPixelSize: 3072)
         }
+    }
+
+    /// Writes the design (and the original) to temporary files and opens them in Quick Look,
+    /// so the user can swipe between "Design" and "Original" like photos in an album.
+    private func openPreview() {
+        guard let resultData = design.resultImageData else { return }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Preview-\(design.id.uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var items: [URL] = []
+        let designURL = folder.appendingPathComponent("\(design.styleTitle) \(design.subjectTitle).jpg")
+        if (try? resultData.write(to: designURL, options: .atomic)) != nil { items.append(designURL) }
+        if let originalData = design.originalImageData {
+            let originalURL = folder.appendingPathComponent("Original.jpg")
+            if (try? originalData.write(to: originalURL, options: .atomic)) != nil { items.append(originalURL) }
+        }
+        guard let first = items.first else { return }
+        previewItems = items
+        previewURL = first
     }
 
     private func saveToPhotos() async {
