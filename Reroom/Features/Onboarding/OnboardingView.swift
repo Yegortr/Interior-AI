@@ -29,6 +29,7 @@ struct OnboardingView: View {
                             .frame(width: 180, height: 180)
                             .background(Circle().fill(Color.accentColor.opacity(0.12)))
                             .symbolEffect(.bounce, value: page == index)
+                            .symbolEffect(.breathe)
                         VStack(spacing: 10) {
                             Text(item.title).font(.largeTitle.bold())
                             Text(item.text)
@@ -43,10 +44,9 @@ struct OnboardingView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .always))
-            .onChange(of: page) { _, _ in Haptics.selection() }
+            .sensoryFeedback(.selection, trigger: page)
 
             Button {
-                Haptics.tap()
                 if page < pages.count - 1 {
                     withAnimation(Theme.spring) { page += 1 }
                 } else {
@@ -54,8 +54,13 @@ struct OnboardingView: View {
                 }
             } label: {
                 Text(page < pages.count - 1 ? "Continue" : "Get Started")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .contentTransition(.numericText())
             }
-            .buttonStyle(.primary)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
         }

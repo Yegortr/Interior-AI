@@ -7,7 +7,9 @@ import UIKit
 /// - optional drag-to-dismiss pan that only engages at 1× when the drag is mostly downward
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
-    var dismissEnabled = true
+    var dismissEnabled = false
+    /// Single tap (after the double-tap has failed) — used to show/hide the chrome, like Photos.
+    var onSingleTap: (() -> Void)?
     /// Starts zoomed to fill the view (used by the inline landscape preview).
     var fillsOnLoad = false
     /// Downward drag distance in points while dragging to dismiss.
@@ -24,6 +26,7 @@ struct ZoomableImageView: UIViewRepresentable {
         view.fillsOnLoad = fillsOnLoad
         view.onDismissDrag = onDismissDrag
         view.onDismissEnd = onDismissEnd
+        view.onSingleTap = onSingleTap
         view.setImage(image)
     }
 }
@@ -34,10 +37,11 @@ final class ZoomableImageContainerView: UIView, UIScrollViewDelegate {
     static let dismissDistance: CGFloat = 120
     static let dismissVelocity: CGFloat = 900
 
-    var dismissEnabled = true
+    var dismissEnabled = false
     var fillsOnLoad = false
     var onDismissDrag: ((CGFloat) -> Void)?
     var onDismissEnd: ((Bool) -> Void)?
+    var onSingleTap: (() -> Void)?
 
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
@@ -69,6 +73,10 @@ final class ZoomableImageContainerView: UIView, UIScrollViewDelegate {
         doubleTap.numberOfTapsRequired = 2
         scrollView.addGestureRecognizer(doubleTap)
 
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
+        singleTap.require(toFail: doubleTap)
+        scrollView.addGestureRecognizer(singleTap)
+
         // UIView.gestureRecognizerShouldBegin (overridden below) gates this recognizer.
         addGestureRecognizer(dismissPan)
         scrollView.panGestureRecognizer.require(toFail: dismissPan)
@@ -91,6 +99,7 @@ final class ZoomableImageContainerView: UIView, UIScrollViewDelegate {
             layoutImage()
             if fillsOnLoad { zoomToFill() }
         }
+        updatePanning()
     }
 
     // MARK: Layout
@@ -142,7 +151,20 @@ final class ZoomableImageContainerView: UIView, UIScrollViewDelegate {
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
-    func scrollViewDidZoom(_ scrollView: UIScrollView) { centerContent() }
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerContent()
+        updatePanning()
+    }
+
+    /// At 1× the scroll view doesn't pan, so vertical drags reach the system zoom transition's
+    /// interactive swipe-to-dismiss (exactly like Photos). Zoomed in, it pans normally.
+    private func updatePanning() {
+        scrollView.panGestureRecognizer.isEnabled = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+    }
+
+    @objc private func handleSingleTap() {
+        onSingleTap?()
+    }
 
     // MARK: Gestures
 
@@ -157,6 +179,7 @@ final class ZoomableImageContainerView: UIView, UIScrollViewDelegate {
             scrollView.zoom(to: rect, animated: true)
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        updatePanning()
     }
 
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {

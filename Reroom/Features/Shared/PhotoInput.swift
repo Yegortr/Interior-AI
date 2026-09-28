@@ -36,82 +36,50 @@ struct PickedPhoto: Identifiable, Equatable {
     }
 }
 
-/// Single-photo input (garden / room photo) with camera and library sources.
-struct SinglePhotoInput: View {
+/// Photo picking as native Form rows: preview, "Choose from Library" and "Take Photo".
+struct PhotoSection: View {
     @Binding var photo: PickedPhoto?
-    var title = "Add a photo"
-    var subtitle = "Take a photo or pick one from your library"
+    let footer: String
 
     @State private var libraryItem: PhotosPickerItem?
     @State private var showCamera = false
     @State private var isLoading = false
 
     var body: some View {
-        VStack(spacing: 12) {
+        Section {
             if let photo {
                 Image(uiImage: photo.preview)
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                    .frame(maxHeight: 360)
-                    .overlay(alignment: .topTrailing) {
-                        Button {
-                            Haptics.tap()
-                            withAnimation(Theme.spring) { self.photo = nil }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.footnote.weight(.bold))
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
-                        }
-                        .padding(10)
-                        .accessibilityLabel("Remove photo")
-                    }
-                    .transition(.scale(scale: 0.95).combined(with: .opacity))
-            } else {
-                VStack(spacing: 14) {
-                    Image(systemName: isLoading ? "hourglass" : "photo.badge.plus")
-                        .font(.system(size: 40))
-                        .foregroundStyle(Color.accentColor)
-                        .symbolEffect(.pulse, isActive: isLoading)
-                    VStack(spacing: 4) {
-                        Text(title).font(.headline)
-                        Text(subtitle).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    }
-                    HStack(spacing: 12) {
-                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                            Button {
-                                Haptics.tap()
-                                showCamera = true
-                            } label: {
-                                Label("Camera", systemImage: "camera")
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        PhotosPicker(selection: $libraryItem, matching: .images) {
-                            Label("Library", systemImage: "photo.on.rectangle")
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 36)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-                        .foregroundStyle(Color.secondary.opacity(0.4))
-                )
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                    .transition(.opacity)
             }
+            PhotosPicker(selection: $libraryItem, matching: .images) {
+                HStack {
+                    Label(photo == nil ? "Choose from Library" : "Choose Another Photo", systemImage: "photo.on.rectangle.angled")
+                    Spacer()
+                    if isLoading { ProgressView() }
+                }
+            }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button {
+                    showCamera = true
+                } label: {
+                    Label("Take Photo", systemImage: "camera")
+                }
+            }
+        } footer: {
+            Text(footer)
         }
-        .animation(Theme.spring, value: photo)
+        .animation(.default, value: photo)
         .onChange(of: libraryItem) { _, item in
             guard let item else { return }
             Task {
                 isLoading = true
                 defer { isLoading = false; libraryItem = nil }
-                if let picked = await PickedPhoto.load(from: item) {
-                    photo = picked
-                }
+                if let picked = await PickedPhoto.load(from: item) { photo = picked }
             }
         }
         .fullScreenCover(isPresented: $showCamera) {
@@ -124,6 +92,7 @@ struct SinglePhotoInput: View {
             }
             .ignoresSafeArea()
         }
+        .sensoryFeedback(.success, trigger: photo?.id)
     }
 }
 

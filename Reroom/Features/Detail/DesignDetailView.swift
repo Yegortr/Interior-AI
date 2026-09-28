@@ -5,6 +5,7 @@ struct DesignDetailView: View {
 
     @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
+    @Namespace private var heroNamespace
 
     @State private var mode: Mode = .design
     @State private var result: UIImage?
@@ -13,234 +14,234 @@ struct DesignDetailView: View {
     @State private var showMakeChanges = false
     @State private var confirmDelete = false
     @State private var saveState: SaveState = .idle
-    @State private var selectedPlant: Plant?
+    @State private var saveError: String?
 
     private enum Mode: String, CaseIterable { case design = "Design", compare = "Before & After" }
-    private enum SaveState: Equatable { case idle, saving, saved, failed(String) }
+    private enum SaveState: Equatable { case idle, saving, saved }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                if design.status == .completed {
+        List {
+            Section {
+                hero
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            } footer: {
+                if design.status == .completed, original != nil {
                     Picker("View", selection: $mode) {
                         ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: mode) { _, _ in Haptics.tap() }
-
-                    hero
-                    actions
-                } else {
-                    Color.clear
-                        .aspectRatio(design.aspectRatio.value, contentMode: .fit)
-                        .overlay {
-                            ZStack {
-                                DesignImage(design: design, kind: .original, maxPixelSize: 1200)
-                                    .blur(radius: 14)
-                                    .opacity(0.45)
-                                Rectangle().fill(Theme.placeholderGradient)
-                                PendingStatusView(design: design, compact: false).padding(24)
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                }
-
-                if case .failed(let message) = saveState {
-                    Label(message, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
-                }
-
-                FlowLayout(spacing: 8) {
-                    if design.kind == .garden {
-                        Chip(title: "Garden", symbol: "leaf")
-                        if let place = design.locationName { Chip(title: place, symbol: "mappin.and.ellipse") }
-                    } else {
-                        Chip(title: design.roomType.title, symbol: design.roomType.symbol)
-                    }
-                    Chip(title: design.styleTitle, symbol: "paintpalette")
-                    Chip(title: design.createdAt.formatted(date: .abbreviated, time: .shortened), symbol: "calendar")
-                }
-
-                if design.kind == .garden {
-                    gardenSection
-                }
-
-                if !design.notes.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(design.parentId == nil ? "Your wishes" : "Requested change").font(.headline)
-                        Text(design.notes).foregroundStyle(.secondary)
-                    }
+                    .padding(.top, 12)
                 }
             }
-            .padding(Theme.horizontalPadding)
-            .animation(Theme.spring, value: mode)
-            .animation(Theme.spring, value: design.statusRaw)
+
+            Section("Details") {
+                if design.kind == .garden {
+                    LabeledContent("Space") { Label("Garden", systemImage: "leaf") }
+                    if let place = design.locationName {
+                        LabeledContent("Location") { Label(place, systemImage: "mappin.and.ellipse") }
+                    }
+                } else {
+                    LabeledContent("Room") { Label(design.roomType.title, systemImage: design.roomType.symbol) }
+                }
+                LabeledContent("Style", value: design.styleTitle)
+                LabeledContent("Created") {
+                    Text(design.createdAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+
+            if !design.notes.isEmpty {
+                Section(design.parentId == nil ? "Your Wishes" : "Requested Change") {
+                    Text(design.notes)
+                }
+            }
+
+            if design.kind == .garden {
+                gardenSections
+            }
+
+            if let saveError {
+                Section {
+                    Label(saveError, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                }
+            }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle(design.styleTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if design.isRetryable {
-                        Button { coordinator.retry(design) } label: { Label("Try Again", systemImage: "arrow.clockwise") }
-                    }
-                    Button(role: .destructive) { confirmDelete = true } label: { Label("Delete", systemImage: "trash") }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
+        .navigationDestination(for: Plant.self) { plant in
+            PlantDetailView(plant: plant, locationName: design.locationName)
         }
-        .safeAreaInset(edge: .bottom) {
-            if design.status == .completed {
-                Button {
-                    Haptics.tap()
-                    showMakeChanges = true
-                } label: {
-                    Label("Make Changes", systemImage: "wand.and.stars")
-                }
-                .buttonStyle(.primary)
-                .padding(.horizontal, Theme.horizontalPadding)
-                .padding(.bottom, 8)
-            }
-        }
+        .toolbar { toolbar }
         .confirmationDialog("Delete this design?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
+            Button("Delete Design", role: .destructive) {
                 dismiss()
                 // Delete after the pop animation so this screen never reads a deleted model.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { coordinator.delete(design) }
             }
+        } message: {
+            Text("It will be removed from all your devices.")
         }
         .sheet(isPresented: $showMakeChanges) {
             MakeChangesSheet(design: design) { dismiss() }
         }
         .fullScreenCover(isPresented: $showFullscreen) {
             if let result {
-                FullscreenViewer(after: result, before: original) { setFullscreen(false) }
-                    .presentationBackground(.clear)
+                FullscreenViewer(after: result, before: original)
+                    .navigationTransition(.zoom(sourceID: "hero", in: heroNamespace))
             }
         }
-        .sheet(item: $selectedPlant) { plant in
-            PlantDetailSheet(plant: plant, locationName: design.locationName)
-        }
+        .sensoryFeedback(.selection, trigger: mode)
+        .sensoryFeedback(.impact(weight: .medium), trigger: design.isFavorite)
+        .sensoryFeedback(.success, trigger: saveState) { _, new in new == .saved }
         .task(id: design.statusRaw) { await loadImages() }
     }
 
+    // MARK: Hero
+
     @ViewBuilder
     private var hero: some View {
-        if mode == .compare, let result, let original {
-            BeforeAfterSlider(before: original, after: result, aspectRatio: design.aspectRatio.value)
-                .transition(.opacity)
-        } else {
+        if design.status != .completed {
             Color.clear
                 .aspectRatio(design.aspectRatio.value, contentMode: .fit)
                 .overlay {
-                    if let result {
-                        Image(uiImage: result).resizable().scaledToFill()
-                    } else {
-                        Rectangle().fill(Theme.placeholderGradient)
+                    ZStack {
+                        DesignImage(design: design, kind: .original, maxPixelSize: 1200)
+                            .blur(radius: 14)
+                            .opacity(0.45)
+                        Rectangle().fill(.ultraThinMaterial)
+                        PendingStatusView(design: design, compact: false).padding(24)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                .contentShape(Rectangle())
-                .onTapGesture { setFullscreen(true) }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else if mode == .compare, let result, let original {
+            BeforeAfterSlider(before: original, after: result, aspectRatio: design.aspectRatio.value)
                 .transition(.opacity)
+        } else {
+            Button {
+                showFullscreen = true
+            } label: {
+                Color.clear
+                    .aspectRatio(design.aspectRatio.value, contentMode: .fit)
+                    .overlay {
+                        if let result {
+                            Image(uiImage: result).resizable().scaledToFill()
+                        } else {
+                            Rectangle().fill(.quaternary)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .matchedTransitionSource(id: "hero", in: heroNamespace)
+            .accessibilityLabel("Open full screen")
+            .transition(.opacity)
         }
     }
 
-    private var actions: some View {
-        HStack(spacing: 12) {
-            actionButton(design.isFavorite ? "Saved" : "Favorite", systemImage: design.isFavorite ? "heart.fill" : "heart", tint: design.isFavorite ? .pink : .accentColor) {
-                Haptics.impact()
-                design.isFavorite.toggle()
-            }
-            actionButton(saveTitle, systemImage: saveIcon, tint: .accentColor) {
-                Task { await saveToPhotos() }
-            }
-            .disabled(saveState == .saving)
-            if let result {
-                ShareLink(item: Image(uiImage: result), preview: SharePreview("Reroom design", image: Image(uiImage: result))) {
-                    actionLabel("Share", systemImage: "square.and.arrow.up", tint: .accentColor)
-                }
-                .buttonStyle(.pressable)
-            }
-            actionButton("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right", tint: .accentColor) {
-                Haptics.tap()
-                setFullscreen(true)
-            }
-        }
-    }
+    // MARK: Garden
 
     @ViewBuilder
-    private var gardenSection: some View {
-        let plants = design.plants
+    private var gardenSections: some View {
         if let notes = design.designNotes, !notes.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Design notes").font(.headline)
-                Text(notes).foregroundStyle(.secondary)
+            Section("Design Notes") {
+                Text(notes)
             }
         }
+        let plants = design.plants
         if plants.isEmpty {
             if design.status.isInProgress {
-                Label("Choosing plants for \(design.locationName ?? "your climate")…", systemImage: "leaf")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Section("Plants") {
+                    Label {
+                        Text("Choosing plants for \(design.locationName ?? "your climate")…")
+                            .foregroundStyle(.secondary)
+                    } icon: {
+                        Image(systemName: "leaf.fill")
+                            .foregroundStyle(.green)
+                            .symbolEffect(.breathe)
+                    }
+                }
             }
         } else {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(
-                    title: "Plants for your garden",
-                    subtitle: design.locationName.map { "Picked to thrive in \($0)" }
-                )
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 14) {
-                    ForEach(plants) { plant in
-                        Button {
-                            Haptics.tap()
-                            selectedPlant = plant
-                        } label: {
-                            PlantCard(plant: plant)
-                        }
-                        .buttonStyle(.pressable)
+            Section {
+                ForEach(plants) { plant in
+                    NavigationLink(value: plant) {
+                        PlantRow(plant: plant)
                     }
+                }
+            } header: {
+                Text("Plants")
+            } footer: {
+                if let place = design.locationName {
+                    Text("Picked to thrive in \(place).")
                 }
             }
         }
     }
 
-    private var saveTitle: String {
-        switch saveState {
-        case .idle, .failed: "Save"
-        case .saving: "Saving…"
-        case .saved: "Saved"
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                if design.isRetryable {
+                    Button { coordinator.retry(design) } label: { Label("Try Again", systemImage: "arrow.clockwise") }
+                }
+                if result != nil {
+                    Button { showFullscreen = true } label: { Label("View Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") }
+                }
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+        if design.status == .completed {
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button {
+                    design.isFavorite.toggle()
+                } label: {
+                    Image(systemName: design.isFavorite ? "heart.fill" : "heart")
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: design.isFavorite)
+                }
+                .tint(design.isFavorite ? .pink : nil)
+                .accessibilityLabel(design.isFavorite ? "Unfavorite" : "Favorite")
+
+                Spacer()
+
+                Button {
+                    Task { await saveToPhotos() }
+                } label: {
+                    Image(systemName: saveState == .saved ? "checkmark.circle.fill" : "square.and.arrow.down")
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.pulse, isActive: saveState == .saving)
+                }
+                .disabled(saveState == .saving)
+                .accessibilityLabel("Save to Photos")
+
+                Spacer()
+
+                if let result {
+                    ShareLink(item: Image(uiImage: result), preview: SharePreview("Reroom design", image: Image(uiImage: result)))
+                }
+
+                Spacer()
+
+                Button {
+                    showMakeChanges = true
+                } label: {
+                    Label("Make Changes", systemImage: "wand.and.sparkles")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+            }
         }
     }
 
-    private var saveIcon: String {
-        saveState == .saved ? "checkmark" : "arrow.down.to.line"
-    }
-
-    private func actionButton(_ title: String, systemImage: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) { actionLabel(title, systemImage: systemImage, tint: tint) }
-            .buttonStyle(.pressable)
-    }
-
-    private func actionLabel(_ title: String, systemImage: String, tint: Color) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundStyle(tint)
-                .contentTransition(.symbolEffect(.replace))
-            Text(title).font(.caption).foregroundStyle(.primary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
-    }
-
-    private func setFullscreen(_ presented: Bool) {
-        guard result != nil else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { showFullscreen = presented }
-    }
+    // MARK: Actions
 
     private func loadImages() async {
         if let data = design.resultImageData {
@@ -254,13 +255,15 @@ struct DesignDetailView: View {
     private func saveToPhotos() async {
         guard let data = design.resultImageData else { return }
         saveState = .saving
+        saveError = nil
         do {
             try await PhotoLibrarySaver.save(imageData: data)
-            Haptics.success()
             withAnimation { saveState = .saved }
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation { saveState = .idle }
         } catch {
-            Haptics.error()
-            saveState = .failed(error.localizedDescription)
+            saveState = .idle
+            saveError = error.localizedDescription
         }
     }
 }
@@ -275,48 +278,50 @@ struct MakeChangesSheet: View {
     @State private var change = ""
     @FocusState private var focused: Bool
 
-    private let ideas = ["Make it brighter", "Swap the sofa for a green velvet one", "Add indoor plants", "Warmer wood tones", "Add a large rug", "Change wall color to sage"]
+    private var ideas: [String] {
+        design.kind == .garden
+            ? ["Add a stone pathway", "More flowering plants", "Add warm string lights", "Replace lawn with gravel", "Add a bench"]
+            : ["Make it brighter", "Swap the sofa for a green velvet one", "Add indoor plants", "Warmer wood tones", "Change wall color to sage"]
+    }
+
+    private var canApply: Bool { !change.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+            Form {
+                Section {
                     TextField("What should change?", text: $change, axis: .vertical)
                         .lineLimit(3...8)
                         .focused($focused)
-                        .padding(14)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
-                    FlowLayout(spacing: 8) {
-                        ForEach(ideas, id: \.self) { idea in
-                            Button {
-                                Haptics.tap()
-                                change = change.isEmpty ? idea : "\(change), \(idea.lowercased())"
-                            } label: {
-                                Chip(title: idea, symbol: "plus")
-                            }
-                            .buttonStyle(.plain)
+                } footer: {
+                    Text("Only what you describe changes — the rest of the design stays the same.")
+                }
+                Section("Ideas") {
+                    ForEach(ideas, id: \.self) { idea in
+                        Button {
+                            change = change.isEmpty ? idea : "\(change), \(idea.lowercased())"
+                        } label: {
+                            Label(idea, systemImage: "plus.circle")
                         }
                     }
                 }
-                .padding(Theme.horizontalPadding)
-            }
-            .safeAreaInset(edge: .bottom) {
-                Button {
-                    coordinator.makeChanges(from: design, change: change)
-                    Haptics.success()
-                    dismiss()
-                    onSubmitted()
-                } label: {
-                    Label("Apply Changes", systemImage: "wand.and.stars")
-                }
-                .buttonStyle(.primary)
-                .disabled(change.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .padding(Theme.horizontalPadding)
             }
             .navigationTitle("Make Changes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        coordinator.makeChanges(from: design, change: change)
+                        Haptics.success()
+                        dismiss()
+                        onSubmitted()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!canApply)
+                }
             }
             .onAppear { focused = true }
         }

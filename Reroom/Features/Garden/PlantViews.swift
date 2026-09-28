@@ -1,33 +1,31 @@
 import SwiftUI
 
-struct PlantCard: View {
+/// List row: thumbnail, common and scientific name, pet-safe badge.
+struct PlantRow: View {
     let plant: Plant
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Color.clear
-                .aspectRatio(1, contentMode: .fit)
-                .overlay { PlantImage(url: plant.imageUrl) }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(alignment: .topLeading) {
-                    if plant.petSafe == true {
-                        Image(systemName: "pawprint.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.white)
-                            .padding(6)
-                            .background(Color.teal, in: Circle())
-                            .padding(6)
-                    }
-                }
+        HStack(spacing: 12) {
+            PlantImage(url: plant.imageUrl)
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(plant.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(plant.name)
                 if let scientific = plant.scientificName {
-                    Text(scientific).font(.caption).italic().foregroundStyle(.secondary).lineLimit(1)
+                    Text(scientific)
+                        .font(.subheadline)
+                        .italic()
+                        .foregroundStyle(.secondary)
                 }
             }
+            Spacer(minLength: 0)
+            if plant.petSafe == true {
+                Image(systemName: "pawprint.fill")
+                    .foregroundStyle(.teal)
+                    .accessibilityLabel("Pet-safe")
+            }
         }
-        .foregroundStyle(.primary)
-        .accessibilityElement(children: .combine)
+        .padding(.vertical, 2)
     }
 }
 
@@ -40,112 +38,99 @@ struct PlantImage: View {
             case .success(let image):
                 image.resizable().scaledToFill()
             default:
-                Rectangle()
-                    .fill(Theme.placeholderGradient)
-                    .overlay(Image(systemName: "leaf").font(.title).foregroundStyle(Color.accentColor.opacity(0.6)))
+                ZStack {
+                    Rectangle().fill(.quaternary)
+                    Image(systemName: "leaf.fill")
+                        .foregroundStyle(.green.opacity(0.6))
+                        .symbolEffect(.breathe, isActive: url != nil)
+                }
             }
         }
     }
 }
 
-/// Plant sheet with a Greg-style grid of colored care tiles.
-struct PlantDetailSheet: View {
+/// Native, Settings-style plant page pushed from the design.
+struct PlantDetailView: View {
     let plant: Plant
     let locationName: String?
-
-    @State private var detent: PresentationDetent = .medium
 
     private struct Fact: Identifiable {
         let title: String
         let value: String
         let symbol: String
-        let tint: Color
+        let color: Color
         var id: String { title }
     }
 
     private var facts: [Fact] {
         var facts: [Fact] = []
-        if let sun = plant.sun { facts.append(Fact(title: "Light", value: sun, symbol: "sun.max.fill", tint: .orange)) }
-        if let water = plant.water { facts.append(Fact(title: "Water", value: water, symbol: "drop.fill", tint: .blue)) }
-        if let care = plant.careLevel { facts.append(Fact(title: "Care", value: care, symbol: "hand.raised.fill", tint: .green)) }
+        if let sun = plant.sun { facts.append(Fact(title: "Light", value: sun, symbol: "sun.max.fill", color: .orange)) }
+        if let water = plant.water { facts.append(Fact(title: "Water", value: water, symbol: "drop.fill", color: .blue)) }
+        if let care = plant.careLevel { facts.append(Fact(title: "Care", value: care, symbol: "hand.raised.fill", color: .green)) }
         if let petSafe = plant.petSafe {
-            facts.append(Fact(title: "Pets", value: petSafe ? "Non-toxic" : "Toxic", symbol: "pawprint.fill", tint: petSafe ? .teal : .red))
+            facts.append(Fact(title: "Pets", value: petSafe ? "Non-toxic" : "Toxic", symbol: "pawprint.fill", color: petSafe ? .teal : .red))
         }
-        if let hardiness = plant.hardiness { facts.append(Fact(title: "Hardiness", value: hardiness, symbol: "thermometer.medium", tint: .purple)) }
-        if let height = plant.height { facts.append(Fact(title: "Height", value: height, symbol: "ruler", tint: .brown)) }
-        if let bloom = plant.bloomSeason { facts.append(Fact(title: "Blooms", value: bloom, symbol: "camera.macro", tint: .pink)) }
+        if let hardiness = plant.hardiness { facts.append(Fact(title: "Hardiness", value: hardiness, symbol: "thermometer.snowflake", color: .purple)) }
+        if let height = plant.height { facts.append(Fact(title: "Height", value: height, symbol: "ruler.fill", color: .brown)) }
+        if let bloom = plant.bloomSeason { facts.append(Fact(title: "Blooms", value: bloom, symbol: "camera.macro", color: .pink)) }
         return facts
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+        List {
+            Section {
                 Color.clear
-                    .aspectRatio(1.2, contentMode: .fit)
+                    .aspectRatio(1.25, contentMode: .fit)
                     .overlay { PlantImage(url: plant.imageUrl) }
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(plant.name).font(.title2.bold())
-                    if let scientific = plant.scientificName {
-                        Text(scientific).italic().foregroundStyle(.secondary)
-                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            } footer: {
+                if let scientific = plant.scientificName {
+                    Text(scientific).italic().font(.subheadline)
                 }
+            }
 
-                if let reason = plant.reason {
-                    Label {
-                        Text(reason)
-                    } icon: {
-                        Image(systemName: "mappin.and.ellipse").foregroundStyle(Color.accentColor)
-                    }
-                    .font(.subheadline)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.accentColor.opacity(0.1)))
-                    .accessibilityLabel("Why it suits \(locationName ?? "your garden"): \(reason)")
+            if let reason = plant.reason {
+                Section(locationName.map { "Why it thrives in \($0)" } ?? "Why this plant") {
+                    Text(reason)
                 }
+            }
 
-                if !facts.isEmpty {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                        ForEach(facts) { fact in
-                            HStack(spacing: 10) {
-                                Image(systemName: fact.symbol)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.white)
-                                    .frame(width: 30, height: 30)
-                                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(fact.tint))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(fact.title).font(.caption).foregroundStyle(.secondary)
-                                    Text(fact.value).font(.subheadline.weight(.semibold)).lineLimit(2).minimumScaleFactor(0.8)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(10)
-                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
-                            .accessibilityElement(children: .combine)
-                        }
-                    }
-                }
-
-                if !plant.careTips.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Care tips").font(.headline)
-                        ForEach(Array(plant.careTips.enumerated()), id: \.offset) { _, tip in
+            if !facts.isEmpty {
+                Section("At a Glance") {
+                    ForEach(facts) { fact in
+                        LabeledContent {
+                            Text(fact.value)
+                        } label: {
                             Label {
-                                Text(tip)
+                                Text(fact.title)
                             } icon: {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                                Image(systemName: fact.symbol)
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 28, height: 28)
+                                    .background(fact.color.gradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             }
-                            .font(.subheadline)
                         }
                     }
                 }
             }
-            .padding(20)
+
+            if !plant.careTips.isEmpty {
+                Section("Care Tips") {
+                    ForEach(Array(plant.careTips.enumerated()), id: \.offset) { _, tip in
+                        Label {
+                            Text(tip)
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        }
+                    }
+                }
+            }
         }
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.visible)
-        .presentationCornerRadius(28)
-        .onChange(of: detent) { _, _ in Haptics.snap() }
+        .listStyle(.insetGrouped)
+        .navigationTitle(plant.name)
+        .navigationBarTitleDisplayMode(.large)
     }
 }

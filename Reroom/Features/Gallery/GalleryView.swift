@@ -10,6 +10,7 @@ struct GalleryView: View {
     @State private var creating: DesignKind?
     @State private var showSettings = false
     @State private var designToDelete: Design?
+    @Namespace private var zoom
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", rooms = "Rooms", gardens = "Gardens", favorites = "Favorites"
@@ -57,18 +58,21 @@ struct GalleryView: View {
                         .accessibilityLabel("Settings")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        withAnimation(Theme.spring) { columnCount = columnCount == 2 ? 1 : 2 }
+                    Menu {
+                        Picker("Layout", selection: $columnCount.animation(Theme.spring)) {
+                            Label("Grid", systemImage: "square.grid.2x2").tag(2)
+                            Label("List", systemImage: "rectangle.grid.1x2").tag(1)
+                        }
                     } label: {
-                        Image(systemName: columnCount == 2 ? "rectangle.grid.1x2" : "square.grid.2x2")
+                        Image(systemName: columnCount == 2 ? "square.grid.2x2" : "rectangle.grid.1x2")
                             .contentTransition(.symbolEffect(.replace))
                     }
-                    .accessibilityLabel(columnCount == 2 ? "One column" : "Two columns")
+                    .accessibilityLabel("Layout")
                 }
             }
             .navigationDestination(for: Design.self) { design in
                 DesignDetailView(design: design)
+                    .navigationTransition(.zoom(sourceID: design.id, in: zoom))
             }
             .fullScreenCover(item: $creating) { kind in
                 switch kind {
@@ -76,6 +80,8 @@ struct GalleryView: View {
                 case .garden: GardenFlowView()
                 }
             }
+            .sensoryFeedback(.selection, trigger: filter)
+            .sensoryFeedback(.selection, trigger: columnCount)
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
@@ -114,12 +120,11 @@ struct GalleryView: View {
     private func cell(_ design: Design, columns: Int) -> some View {
         NavigationLink(value: design) {
             DesignCard(design: design, columns: columns)
+                .matchedTransitionSource(id: design.id, in: zoom)
         }
-        .buttonStyle(.pressable)
-        .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
+        .buttonStyle(.plain)
         .contextMenu {
             Button {
-                Haptics.impact()
                 design.isFavorite.toggle()
             } label: {
                 design.isFavorite
@@ -143,25 +148,14 @@ struct GalleryView: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(Filter.allCases) { option in
-                    Button {
-                        guard option != filter else { return }
-                        Haptics.tap()
-                        withAnimation(Theme.spring) { filter = option }
-                    } label: {
-                        Chip(title: option.rawValue, isSelected: filter == option)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, Theme.horizontalPadding)
+        Picker("Show", selection: $filter) {
+            ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
         }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, Theme.horizontalPadding)
     }
 
     private func start(_ kind: DesignKind) {
-        Haptics.tap()
         creating = kind
     }
 
@@ -187,6 +181,8 @@ private struct StartCard: View {
     let kind: DesignKind
     let action: () -> Void
 
+    @State private var taps = 0
+
     private var colors: [Color] {
         kind == .interior
             ? [Color(hex: "#E9DFD3") ?? .brown, Color(hex: "#B08B6E") ?? .brown]
@@ -194,9 +190,13 @@ private struct StartCard: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            taps += 1
+            action()
+        } label: {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: kind == .interior ? "sofa.fill" : "leaf.fill")
+                    .symbolEffect(.bounce, value: taps)
                     .font(.title)
                     .foregroundStyle(.white)
                     .frame(width: 52, height: 52)
@@ -220,7 +220,8 @@ private struct StartCard: View {
                 in: RoundedRectangle(cornerRadius: 24, style: .continuous)
             )
         }
-        .buttonStyle(.pressable)
+        .buttonStyle(.plain)
+        .sensoryFeedback(.impact(weight: .medium), trigger: taps)
         .accessibilityLabel(kind == .interior ? "Redesign a room" : "Design a garden")
     }
 }

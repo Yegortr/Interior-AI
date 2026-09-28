@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Photo → where → sunlight → style → care → extras → generate.
-/// The location drives the plant picks: the server chooses plants that thrive in that climate.
+/// Garden flow: photo → location → sunlight → style → care → extras → generate.
+/// Native pushed Form steps; the location drives regional plant picks on the server.
 struct GardenFlowView: View {
     @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
 
-    private enum Step: Int, CaseIterable { case photo, location, sunlight, style, care, extras }
+    private enum Step: Hashable { case location, sunlight, style, care, extras }
+    private let stepCount = 6
 
-    @State private var step: Step = .photo
-    @State private var isForward = true
+    @State private var path: [Step] = []
     @State private var photo: PickedPhoto?
     @State private var location: GardenLocation?
     @State private var sunlight: Sunlight = .fullSun
@@ -19,143 +19,146 @@ struct GardenFlowView: View {
     @State private var hardscaping: Set<Hardscape> = []
     @State private var notes = ""
 
-    private var canContinue: Bool {
-        switch step {
-        case .photo: photo != nil
-        case .location: location != nil
-        default: true
-        }
-    }
-
     var body: some View {
-        NavigationStack {
-            QuestionnaireScaffold(
-                step: step.rawValue,
-                stepCount: Step.allCases.count,
-                title: title,
-                subtitle: subtitle,
-                isForward: isForward,
-                canContinue: canContinue,
-                continueTitle: step == .extras ? "Design My Garden" : "Continue",
-                onBack: step == .photo ? nil : { move(by: -1) },
-                onContinue: {
-                    if step == .extras { generate() } else { move(by: 1) }
-                }
-            ) {
-                content
+        NavigationStack(path: $path) {
+            FlowStep(index: 0, count: stepCount, title: "Your Garden", buttonTitle: "Continue", canContinue: photo != nil) {
+                path.append(.location)
+            } content: {
+                PhotoSection(photo: $photo, footer: "A wide photo of the whole yard, balcony or terrace works best.")
             }
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel", role: .cancel) { dismiss() }
+                }
+            }
+            .navigationDestination(for: Step.self) { step in
+                switch step {
+                case .location: locationStep
+                case .sunlight: sunlightStep
+                case .style: styleStep
+                case .care: careStep
+                case .extras: extrasStep
                 }
             }
         }
+        .sensoryFeedback(.selection, trigger: sunlight)
+        .sensoryFeedback(.selection, trigger: style)
+        .sensoryFeedback(.selection, trigger: maintenance)
+        .sensoryFeedback(.selection, trigger: hardscaping)
+        .sensoryFeedback(.impact(weight: .light), trigger: path.count)
     }
 
-    private var title: String {
-        switch step {
-        case .photo: "Show us your garden"
-        case .location: "Where is it?"
-        case .sunlight: "How much sun?"
-        case .style: "Pick a garden style"
-        case .care: "Care & safety"
-        case .extras: "Finishing touches"
+    private var locationStep: some View {
+        FlowStep(index: 1, count: stepCount, title: "Location", buttonTitle: "Continue", canContinue: location != nil) {
+            path.append(.sunlight)
+        } content: {
+            LocationSection(location: $location)
         }
     }
 
-    private var subtitle: String? {
-        switch step {
-        case .photo: "A wide photo of the whole yard, balcony or terrace works best."
-        case .location: "We'll pick plants that actually thrive in your climate."
-        case .sunlight: "Think about the sunniest part of the space."
-        case .style: nil
-        case .care: "How much time will you spend on it?"
-        case .extras: "Add structures and wishes — all optional."
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch step {
-        case .photo:
-            SinglePhotoInput(photo: $photo, title: "Add a garden photo")
-
-        case .location:
-            LocationPicker(location: $location)
-
-        case .sunlight:
-            ForEach(Sunlight.allCases) { option in
-                OptionCard(title: option.title, subtitle: option.subtitle, symbol: option.symbol, isSelected: sunlight == option) {
-                    sunlight = option
-                }
-            }
-
-        case .style:
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                ForEach(GardenStyle.allCases) { item in
-                    SwatchTile(
-                        title: item.title,
-                        subtitle: item.promptDetails,
-                        colors: item.swatch,
-                        isSelected: style == item
-                    ) {
-                        Haptics.tap()
-                        style = item
+    private var sunlightStep: some View {
+        FlowStep(index: 2, count: stepCount, title: "Sunlight", buttonTitle: "Continue", canContinue: true) {
+            path.append(.style)
+        } content: {
+            Section {
+                Picker("Sunlight", selection: $sunlight) {
+                    ForEach(Sunlight.allCases) { option in
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.title)
+                                Text(option.subtitle).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: option.symbol).symbolRenderingMode(.multicolor)
+                        }
+                        .tag(option)
                     }
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } footer: {
+                Text("Think about the sunniest part of the space.")
             }
+        }
+    }
 
-        case .care:
-            ForEach(MaintenanceLevel.allCases) { level in
-                OptionCard(title: level.title, subtitle: level.subtitle, symbol: "clock", isSelected: maintenance == level) {
-                    maintenance = level
-                }
-            }
-            Toggle(isOn: $petSafe) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Pet-safe plants only")
-                        Text("Skip plants toxic to cats and dogs").font(.caption).foregroundStyle(.secondary)
+    private var styleStep: some View {
+        FlowStep(index: 3, count: stepCount, title: "Style", buttonTitle: "Continue", canContinue: true) {
+            path.append(.care)
+        } content: {
+            Section {
+                Picker("Style", selection: $style) {
+                    ForEach(GardenStyle.allCases) { item in
+                        StyleRow(title: item.title, details: item.promptDetails, colors: item.swatch).tag(item)
                     }
-                } icon: {
-                    Image(systemName: "pawprint.fill").foregroundStyle(Color.accentColor)
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
             }
-            .padding(16)
-            .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Color(.secondarySystemBackground)))
-            .onChange(of: petSafe) { _, _ in Haptics.tap() }
+        }
+    }
 
-        case .extras:
-            FlowLayout(spacing: 10) {
+    private var careStep: some View {
+        FlowStep(index: 4, count: stepCount, title: "Care", buttonTitle: "Continue", canContinue: true) {
+            path.append(.extras)
+        } content: {
+            Section("Time for the garden") {
+                Picker("Maintenance", selection: $maintenance) {
+                    ForEach(MaintenanceLevel.allCases) { level in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(level.title)
+                            Text(level.subtitle).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .tag(level)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
+            Section {
+                Toggle(isOn: $petSafe) {
+                    Label("Pet-Safe Plants Only", systemImage: "pawprint.fill")
+                }
+            } footer: {
+                Text("Skips plants that are toxic to cats and dogs.")
+            }
+        }
+    }
+
+    private var extrasStep: some View {
+        FlowStep(index: 5, count: stepCount, title: "Finishing Touches", buttonTitle: "Design My Garden", buttonSymbol: "wand.and.sparkles", canContinue: photo != nil && location != nil) {
+            generate()
+        } content: {
+            Section("Structures") {
                 ForEach(Hardscape.allCases) { element in
                     let isSelected = hardscaping.contains(element)
                     Button {
-                        Haptics.tap()
                         if isSelected { hardscaping.remove(element) } else { hardscaping.insert(element) }
                     } label: {
-                        Chip(title: element.title, symbol: element.symbol, isSelected: isSelected)
+                        HStack {
+                            Label(element.title, systemImage: element.symbol)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "checkmark")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.tint)
+                                .opacity(isSelected ? 1 : 0)
+                                .symbolEffect(.bounce, value: isSelected)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .animation(Theme.snappy, value: hardscaping)
-            TextField("Anything else? (e.g. keep the old apple tree)", text: $notes, axis: .vertical)
-                .lineLimit(2...5)
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
-            if let location {
-                Label("Plants will be chosen for \(location.name)", systemImage: "leaf")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Section {
+                TextField("E.g. keep the old apple tree", text: $notes, axis: .vertical)
+                    .lineLimit(2...5)
+            } header: {
+                Text("Wishes")
+            } footer: {
+                if let location {
+                    Text("Plants will be chosen to thrive in \(location.name).")
+                }
             }
         }
-    }
-
-    private func move(by delta: Int) {
-        guard let next = Step(rawValue: step.rawValue + delta) else { return }
-        isForward = delta > 0
-        withAnimation(Theme.spring) { step = next }
     }
 
     private func generate() {
@@ -176,8 +179,8 @@ struct GardenFlowView: View {
     }
 }
 
-/// "Use my location" or type a city (Wolt/Beli-style), showing the chosen place.
-private struct LocationPicker: View {
+/// "Use My Location" or a typed city, as native Form rows.
+private struct LocationSection: View {
     @Binding var location: GardenLocation?
 
     @State private var service = LocationService()
@@ -187,79 +190,67 @@ private struct LocationPicker: View {
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "map.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 110, height: 110)
-                .background(Circle().fill(Color.accentColor.opacity(0.12)))
-                .symbolEffect(.pulse, isActive: isLocating)
-                .frame(maxWidth: .infinity)
-
+        Section {
             if let location {
-                HStack(spacing: 12) {
-                    Image(systemName: "mappin.circle.fill").font(.title2).foregroundStyle(Color.accentColor)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(location.name).font(.headline)
-                        Text("Plants will be matched to this climate").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Label {
+                        Text(location.name)
+                    } icon: {
+                        Image(systemName: "mappin.circle.fill")
+                            .symbolRenderingMode(.multicolor)
+                            .symbolEffect(.bounce, value: location)
                     }
                     Spacer()
                     Button("Change") {
-                        Haptics.tap()
-                        withAnimation(Theme.spring) { self.location = nil }
+                        withAnimation { self.location = nil }
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.borderless)
                 }
-                .padding(16)
-                .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Color.accentColor.opacity(0.1)))
-                .transition(.scale(scale: 0.95).combined(with: .opacity))
             } else {
                 Button {
                     Task { await locate() }
                 } label: {
-                    if isLocating {
-                        ProgressView().tint(.white)
-                    } else {
-                        Label("Use My Location", systemImage: "location.fill")
+                    HStack {
+                        Label {
+                            Text("Use My Location")
+                        } icon: {
+                            Image(systemName: "location.fill")
+                                .symbolEffect(.pulse, isActive: isLocating)
+                        }
+                        Spacer()
+                        if isLocating { ProgressView() }
                     }
                 }
-                .buttonStyle(.primary)
                 .disabled(isLocating)
 
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                HStack {
                     TextField("Or type your city", text: $manualName)
                         .textContentType(.addressCity)
                         .submitLabel(.done)
                         .focused($fieldFocused)
                         .onSubmit(useManual)
                     if !manualName.trimmingCharacters(in: .whitespaces).isEmpty {
-                        Button("Use", action: useManual).font(.subheadline.weight(.semibold))
+                        Button("Use", action: useManual)
+                            .buttonStyle(.borderless)
+                            .fontWeight(.semibold)
                     }
                 }
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
             }
-
-            if let errorMessage {
-                Text(errorMessage).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            }
-
-            Text("Only your approximate area is used, never your address.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+        } header: {
+            Text("Where is your garden?")
+        } footer: {
+            Text(errorMessage ?? "We pick plants that thrive in your climate. Only your approximate area is used — never your address.")
         }
-        .animation(Theme.spring, value: location)
+        .sensoryFeedback(.success, trigger: location)
     }
 
     private func locate() async {
-        Haptics.tap()
         isLocating = true
         errorMessage = nil
         defer { isLocating = false }
         do {
-            location = try await service.currentLocation()
-            Haptics.success()
+            let found = try await service.currentLocation()
+            withAnimation { location = found }
         } catch {
             errorMessage = error.localizedDescription
             fieldFocused = true
@@ -269,59 +260,7 @@ private struct LocationPicker: View {
     private func useManual() {
         let name = manualName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        Haptics.tap()
         fieldFocused = false
-        location = GardenLocation(name: name)
-    }
-}
-
-/// Gradient tile for a style choice (rooms and gardens).
-struct SwatchTile: View {
-    let title: String
-    let subtitle: String
-    let colors: (String, String)
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                LinearGradient(
-                    colors: [Color(hex: colors.0) ?? .gray, Color(hex: colors.1) ?? .black],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .frame(height: 90)
-                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 45, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 45, style: .continuous))
-                .overlay(alignment: .topTrailing) {
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, Color.accentColor)
-                            .font(.title2)
-                            .padding(10)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
-            )
-        }
-        .buttonStyle(.pressable)
-        .animation(Theme.snappy, value: isSelected)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        withAnimation { location = GardenLocation(name: name) }
     }
 }

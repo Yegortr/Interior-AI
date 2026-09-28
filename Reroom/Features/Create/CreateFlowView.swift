@@ -1,124 +1,104 @@
 import SwiftUI
 
-/// Photo → room → style → wishes → generate. The design appears in the gallery immediately.
+/// Room flow. Each step is pushed on a NavigationStack: system Back button and swipe-back.
 struct CreateFlowView: View {
     @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
 
-    private enum Step: Int, CaseIterable { case photo, room, style, wishes }
+    private enum Step: Hashable { case room, style, wishes }
+    private let stepCount = 4
 
-    @State private var step: Step = .photo
-    @State private var isForward = true
+    @State private var path: [Step] = []
     @State private var photo: PickedPhoto?
     @State private var roomType: RoomType = .livingRoom
     @State private var style: InteriorStyle = .modern
     @State private var notes = ""
 
+    private let ideas = ["Keep the furniture layout", "Add plants", "Brighter lighting", "Add a rug", "Built-in shelving"]
+
     var body: some View {
-        NavigationStack {
-            QuestionnaireScaffold(
-                step: step.rawValue,
-                stepCount: Step.allCases.count,
-                title: title,
-                subtitle: subtitle,
-                isForward: isForward,
-                canContinue: step != .photo || photo != nil,
-                continueTitle: step == .wishes ? "Generate" : "Continue",
-                onBack: step == .photo ? nil : { move(by: -1) },
-                onContinue: {
-                    if step == .wishes { generate() } else { move(by: 1) }
-                }
-            ) {
-                content
+        NavigationStack(path: $path) {
+            FlowStep(index: 0, count: stepCount, title: "Your Room", buttonTitle: "Continue", canContinue: photo != nil) {
+                path.append(.room)
+            } content: {
+                PhotoSection(photo: $photo, footer: "Stand in a corner and capture as much of the room as you can, in good light.")
             }
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel", role: .cancel) { dismiss() }
+                }
+            }
+            .navigationDestination(for: Step.self) { step in
+                switch step {
+                case .room: roomStep
+                case .style: styleStep
+                case .wishes: wishesStep
                 }
             }
         }
+        .sensoryFeedback(.selection, trigger: roomType)
+        .sensoryFeedback(.selection, trigger: style)
+        .sensoryFeedback(.impact(weight: .light), trigger: path.count)
     }
 
-    private var title: String {
-        switch step {
-        case .photo: "Photograph your room"
-        case .room: "What room is it?"
-        case .style: "Choose a style"
-        case .wishes: "Anything specific?"
-        }
-    }
-
-    private var subtitle: String? {
-        switch step {
-        case .photo: "Stand in a corner and capture as much of the room as you can, in good light."
-        case .room: nil
-        case .style: nil
-        case .wishes: "Optional — e.g. \"keep the fireplace\" or \"add a reading nook\"."
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch step {
-        case .photo:
-            SinglePhotoInput(photo: $photo, title: "Add a room photo")
-
-        case .room:
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                ForEach(RoomType.allCases) { room in
-                    RoomTile(room: room, isSelected: roomType == room) {
-                        Haptics.tap()
-                        roomType = room
+    private var roomStep: some View {
+        FlowStep(index: 1, count: stepCount, title: "Room Type", buttonTitle: "Continue", canContinue: true) {
+            path.append(.style)
+        } content: {
+            Section {
+                Picker("Room", selection: $roomType) {
+                    ForEach(RoomType.allCases) { room in
+                        Label(room.title, systemImage: room.symbol).tag(room)
                     }
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
             }
+        }
+    }
 
-        case .style:
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                ForEach(InteriorStyle.allCases) { item in
-                    SwatchTile(title: item.title, subtitle: item.promptDetails, colors: item.swatch, isSelected: style == item) {
-                        Haptics.tap()
-                        style = item
+    private var styleStep: some View {
+        FlowStep(index: 2, count: stepCount, title: "Style", buttonTitle: "Continue", canContinue: true) {
+            path.append(.wishes)
+        } content: {
+            Section {
+                Picker("Style", selection: $style) {
+                    ForEach(InteriorStyle.allCases) { item in
+                        StyleRow(title: item.title, details: item.promptDetails, colors: item.swatch).tag(item)
                     }
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
             }
+        }
+    }
 
-        case .wishes:
-            if let photo {
-                Image(uiImage: photo.preview)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(height: 180)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+    private var wishesStep: some View {
+        FlowStep(index: 3, count: stepCount, title: "Wishes", buttonTitle: "Generate", buttonSymbol: "wand.and.sparkles", canContinue: photo != nil) {
+            generate()
+        } content: {
+            Section {
+                TextField("E.g. keep the fireplace", text: $notes, axis: .vertical)
+                    .lineLimit(3...6)
+            } header: {
+                Text("Anything specific?")
+            } footer: {
+                Text("Optional.")
             }
-            FlowLayout(spacing: 8) {
-                Chip(title: roomType.title, symbol: roomType.symbol)
-                Chip(title: style.title, symbol: "paintpalette")
-            }
-            TextField("Your wishes (optional)", text: $notes, axis: .vertical)
-                .lineLimit(3...6)
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)))
-            FlowLayout(spacing: 8) {
-                ForEach(["Keep the furniture layout", "Add plants", "Brighter lighting", "Add a rug", "Built-in shelving"], id: \.self) { idea in
+            Section("Ideas") {
+                ForEach(ideas, id: \.self) { idea in
                     Button {
-                        Haptics.tap()
                         notes = notes.isEmpty ? idea : "\(notes), \(idea.lowercased())"
                     } label: {
-                        Chip(title: idea, symbol: "plus")
+                        Label(idea, systemImage: "plus.circle")
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            Section("Summary") {
+                LabeledContent("Room") { Label(roomType.title, systemImage: roomType.symbol) }
+                LabeledContent("Style", value: style.title)
+            }
         }
-    }
-
-    private func move(by delta: Int) {
-        guard let next = Step(rawValue: step.rawValue + delta) else { return }
-        isForward = delta > 0
-        withAnimation(Theme.spring) { step = next }
     }
 
     private func generate() {
@@ -129,33 +109,29 @@ struct CreateFlowView: View {
     }
 }
 
-private struct RoomTile: View {
-    let room: RoomType
-    let isSelected: Bool
-    let action: () -> Void
+/// Picker row for a style: a two-tone swatch, the name and a short description.
+struct StyleRow: View {
+    let title: String
+    let details: String
+    let colors: (String, String)
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: room.symbol)
-                    .font(.title2)
-                    .foregroundStyle(isSelected ? Color.white : Color.accentColor)
-                Text(room.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+        HStack(spacing: 12) {
+            Circle()
+                .fill(LinearGradient(
+                    colors: [Color(hex: colors.0) ?? .gray, Color(hex: colors.1) ?? .black],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+                .frame(width: 30, height: 30)
+                .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(details)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 26)
-            .padding(.bottom, 16)
-            .background(
-                UnevenRoundedRectangle(topLeadingRadius: 48, bottomLeadingRadius: 14, bottomTrailingRadius: 14, topTrailingRadius: 48, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
-            )
         }
-        .buttonStyle(.pressable)
-        .animation(Theme.snappy, value: isSelected)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .padding(.vertical, 2)
     }
 }

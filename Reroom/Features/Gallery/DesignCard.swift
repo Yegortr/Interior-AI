@@ -65,7 +65,7 @@ struct DesignCard: View {
             DesignImage(design: design, kind: .original, maxPixelSize: 400)
                 .blur(radius: 14)
                 .opacity(0.45)
-            Rectangle().fill(Theme.placeholderGradient)
+            Rectangle().fill(.ultraThinMaterial)
             PendingStatusView(design: design, compact: isCompact)
                 .padding(isCompact ? 10 : 20)
         }
@@ -95,31 +95,48 @@ struct PendingStatusView: View {
             }
             if design.isRetryable {
                 Button {
-                    Haptics.tap()
                     coordinator.retry(design)
                 } label: {
                     Label("Try Again", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
                 .controlSize(compact ? .small : .regular)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Animated SF Symbols instead of spinners: each state has its own motion.
     @ViewBuilder
     private var icon: some View {
+        let font: Font = compact ? .title2 : .largeTitle
         switch design.status {
-        case .submitting, .queued, .generating:
-            ProgressView().controlSize(compact ? .regular : .large)
+        case .submitting:
+            Image(systemName: "icloud.and.arrow.up")
+                .font(font)
+                .foregroundStyle(.tint)
+                .symbolEffect(.pulse)
+        case .queued:
+            Image(systemName: "hourglass")
+                .font(font)
+                .foregroundStyle(.tint)
+                .symbolEffect(.rotate)
+        case .generating:
+            Image(systemName: design.kind == .garden ? "leaf.fill" : "wand.and.sparkles")
+                .font(font)
+                .foregroundStyle(.tint)
+                .symbolEffect(.breathe)
         case .stale:
             Image(systemName: "clock.badge.exclamationmark")
-                .font(compact ? .title3 : .largeTitle)
-                .foregroundStyle(.orange)
+                .font(font)
+                .symbolRenderingMode(.multicolor)
+                .symbolEffect(.pulse)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(compact ? .title3 : .largeTitle)
-                .foregroundStyle(.red)
+                .font(font)
+                .symbolRenderingMode(.multicolor)
+                .symbolEffect(.bounce, value: design.errorMessage)
         case .completed:
             EmptyView()
         }
