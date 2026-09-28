@@ -194,7 +194,8 @@ final class GenerationCoordinatorTests: XCTestCase {
         XCTAssertEqual(design.gardenContext?.location.latitude, 38.7, "Coordinates are coarsened")
         await coordinator.submit(design)
 
-        let request = try XCTUnwrap(await api.requests.last)
+        let requests = await api.requests
+        let request = try XCTUnwrap(requests.last)
         XCTAssertEqual(request.kind, .garden)
         XCTAssertEqual(request.garden?.style, .mediterranean)
         XCTAssertTrue(request.garden?.petSafe == true)
@@ -217,7 +218,8 @@ final class GenerationCoordinatorTests: XCTestCase {
         XCTAssertEqual(edit.kind, .garden)
         XCTAssertEqual(edit.plants.map(\.name), ["Olive"])
         await coordinator.submit(edit)
-        let request = try XCTUnwrap(await api.requests.last)
+        let requests = await api.requests
+        let request = try XCTUnwrap(requests.last)
         XCTAssertNil(request.garden)
     }
 
