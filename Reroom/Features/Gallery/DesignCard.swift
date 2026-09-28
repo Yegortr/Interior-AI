@@ -23,6 +23,16 @@ struct DesignCard: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
+            .overlay(alignment: .topLeading) {
+                if design.kind == .garden {
+                    Image(systemName: "leaf.fill")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(7)
+                        .background(Color.green.opacity(0.75), in: Circle())
+                        .padding(8)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if design.isFavorite {
                     Image(systemName: "heart.fill")
@@ -36,7 +46,7 @@ struct DesignCard: View {
             }
             .overlay(alignment: .bottomLeading) {
                 if design.status == .completed, !isCompact {
-                    Text("\(design.style.title) · \(design.roomType.title)")
+                    Text("\(design.styleTitle) · \(design.subjectTitle)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
@@ -47,7 +57,7 @@ struct DesignCard: View {
             }
             .animation(Theme.spring, value: design.statusRaw)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(design.style.title) \(design.roomType.title)")
+            .accessibilityLabel("\(design.styleTitle) \(design.subjectTitle)")
     }
 
     private var pending: some View {

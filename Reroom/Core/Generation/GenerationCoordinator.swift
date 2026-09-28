@@ -51,6 +51,15 @@ final class GenerationCoordinator {
         return design
     }
 
+    /// A garden: the server first picks plants that thrive in the user's region, then renders.
+    @discardableResult
+    func createGarden(_ context: GardenContext, photo: ImageProcessing.PreparedImage) -> Design {
+        let design = Design.garden(context, originalImageData: photo.data, aspectRatio: photo.aspectRatio ?? .gridCard)
+        design.prompt = PromptBuilder.garden(context)
+        insertAndSubmit(design)
+        return design
+    }
+
     /// "Make Changes": a new design whose source photo is the previous result.
     @discardableResult
     func makeChanges(from source: Design, change: String) -> Design? {
@@ -60,6 +69,12 @@ final class GenerationCoordinator {
             originalImageData: resultData, aspectRatio: source.aspectRatio
         )
         design.parentId = source.id
+        design.kindRaw = source.kindRaw
+        design.gardenStyleRaw = source.gardenStyleRaw
+        design.locationName = source.locationName
+        // Keep the plant list: an edit changes the picture, not the recommendations.
+        design.plantsData = source.plantsData
+        design.designNotes = source.designNotes
         design.prompt = PromptBuilder.edit(change: change)
         insertAndSubmit(design)
         return design
@@ -114,7 +129,10 @@ final class GenerationCoordinator {
                 aspectRatio: design.aspectRatio.stringValue,
                 width: size.width,
                 height: size.height,
-                clientRequestId: design.id
+                clientRequestId: design.id,
+                kind: design.kind,
+                // Edits reuse the source's plants; only fresh gardens ask for new ones.
+                garden: design.parentId == nil ? design.gardenContext : nil
             )
             let jobId = try await api.start(request)
             guard !design.isDeleted else { return }
@@ -174,6 +192,12 @@ final class GenerationCoordinator {
     }
 
     private func apply(_ row: JobRow, to design: Design) async {
+        if let plants = row.plants, !plants.isEmpty, plants != design.plants {
+            design.plants = plants
+        }
+        if let notes = row.designNotes, !notes.isEmpty, notes != design.designNotes {
+            design.designNotes = notes
+        }
         switch row.status {
         case .queued, .unknown:
             break

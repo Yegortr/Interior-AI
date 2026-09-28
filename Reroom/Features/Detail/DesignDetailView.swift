@@ -13,6 +13,7 @@ struct DesignDetailView: View {
     @State private var showMakeChanges = false
     @State private var confirmDelete = false
     @State private var saveState: SaveState = .idle
+    @State private var selectedPlant: Plant?
 
     private enum Mode: String, CaseIterable { case design = "Design", compare = "Before & After" }
     private enum SaveState: Equatable { case idle, saving, saved, failed(String) }
@@ -49,9 +50,18 @@ struct DesignDetailView: View {
                 }
 
                 FlowLayout(spacing: 8) {
-                    Chip(title: design.roomType.title, symbol: design.roomType.symbol)
-                    Chip(title: design.style.title, symbol: "paintpalette")
+                    if design.kind == .garden {
+                        Chip(title: "Garden", symbol: "leaf")
+                        if let place = design.locationName { Chip(title: place, symbol: "mappin.and.ellipse") }
+                    } else {
+                        Chip(title: design.roomType.title, symbol: design.roomType.symbol)
+                    }
+                    Chip(title: design.styleTitle, symbol: "paintpalette")
                     Chip(title: design.createdAt.formatted(date: .abbreviated, time: .shortened), symbol: "calendar")
+                }
+
+                if design.kind == .garden {
+                    gardenSection
                 }
 
                 if !design.notes.isEmpty {
@@ -65,7 +75,7 @@ struct DesignDetailView: View {
             .animation(Theme.spring, value: mode)
             .animation(Theme.spring, value: design.statusRaw)
         }
-        .navigationTitle(design.style.title)
+        .navigationTitle(design.styleTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -107,6 +117,9 @@ struct DesignDetailView: View {
                 FullscreenViewer(after: result, before: original) { setFullscreen(false) }
                     .presentationBackground(.clear)
             }
+        }
+        .sheet(item: $selectedPlant) { plant in
+            PlantDetailSheet(plant: plant, locationName: design.locationName)
         }
         .task(id: design.statusRaw) { await loadImages() }
     }
@@ -152,6 +165,42 @@ struct DesignDetailView: View {
             actionButton("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right", tint: .accentColor) {
                 Haptics.tap()
                 setFullscreen(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var gardenSection: some View {
+        let plants = design.plants
+        if let notes = design.designNotes, !notes.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Design notes").font(.headline)
+                Text(notes).foregroundStyle(.secondary)
+            }
+        }
+        if plants.isEmpty {
+            if design.status.isInProgress {
+                Label("Choosing plants for \(design.locationName ?? "your climate")…", systemImage: "leaf")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(
+                    title: "Plants for your garden",
+                    subtitle: design.locationName.map { "Picked to thrive in \($0)" }
+                )
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 14) {
+                    ForEach(plants) { plant in
+                        Button {
+                            Haptics.tap()
+                            selectedPlant = plant
+                        } label: {
+                            PlantCard(plant: plant)
+                        }
+                        .buttonStyle(.pressable)
+                    }
+                }
             }
         }
     }

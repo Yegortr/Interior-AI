@@ -12,8 +12,8 @@ struct OnboardingView: View {
     }
 
     private let pages = [
-        Page(symbol: "camera.viewfinder", title: "Snap your room", text: "Take a photo of any room — living room, kitchen, bedroom or even a balcony."),
-        Page(symbol: "paintpalette", title: "Pick a style", text: "Scandinavian, Japandi, Industrial and more. Add your own wishes if you like."),
+        Page(symbol: "camera.viewfinder", title: "Snap your space", text: "Take a photo of any room, balcony, yard or garden."),
+        Page(symbol: "leaf", title: "Plants for your climate", text: "For gardens we pick plants that thrive where you live — with care tips for each."),
         Page(symbol: "sparkles", title: "See it redesigned", text: "Get a photorealistic redesign in seconds. Compare before and after, then refine it."),
     ]
 

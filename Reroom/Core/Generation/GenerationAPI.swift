@@ -11,6 +11,9 @@ struct GenerationRequest: Codable, Hashable, Sendable {
     var height: Int
     /// Local design id, for idempotency and debugging.
     var clientRequestId: UUID
+    var kind: DesignKind = .interior
+    /// Garden answers; the server uses them to pick regional plants before rendering.
+    var garden: GardenContext?
 }
 
 /// `generation_jobs` status as written by the server.
@@ -27,18 +30,39 @@ struct JobRow: Decodable, Hashable, Sendable {
     let status: JobStatus
     let resultUrl: URL?
     let errorMessage: String?
+    /// Garden jobs: plants picked for the user's region (may arrive before the image).
+    let plants: [Plant]?
+    let designNotes: String?
 
-    init(id: UUID, status: JobStatus, resultUrl: URL? = nil, errorMessage: String? = nil) {
+    init(id: UUID, status: JobStatus, resultUrl: URL? = nil, errorMessage: String? = nil, plants: [Plant]? = nil, designNotes: String? = nil) {
         self.id = id
         self.status = status
         self.resultUrl = resultUrl
         self.errorMessage = errorMessage
+        self.plants = plants
+        self.designNotes = designNotes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        status = (try? c.decode(JobStatus.self, forKey: .status)) ?? .unknown
+        resultUrl = (try? c.decodeIfPresent(String.self, forKey: .resultUrl)).flatMap(URL.init(string:))
+        errorMessage = try? c.decodeIfPresent(String.self, forKey: .errorMessage)
+        plants = (try? c.decodeIfPresent([LossyPlant].self, forKey: .plants))?.compactMap(\.plant)
+        designNotes = try? c.decodeIfPresent(String.self, forKey: .designNotes)
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, status
+        case id, status, plants
         case resultUrl = "result_url"
         case errorMessage = "error_message"
+        case designNotes = "design_notes"
+    }
+
+    private struct LossyPlant: Decodable {
+        let plant: Plant?
+        init(from decoder: Decoder) throws { plant = try? Plant(from: decoder) }
     }
 }
 
@@ -79,7 +103,7 @@ struct SupabaseGenerationAPI: GenerationAPI {
         guard !ids.isEmpty else { return [] }
         return try await client
             .from("generation_jobs")
-            .select("id,status,result_url,error_message")
+            .select("id,status,result_url,error_message,plants,design_notes")
             .in("id", values: ids.map(\.dbString))
             .execute()
             .value

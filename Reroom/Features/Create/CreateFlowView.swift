@@ -77,7 +77,7 @@ struct CreateFlowView: View {
         case .style:
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 ForEach(InteriorStyle.allCases) { item in
-                    StyleTile(style: item, isSelected: style == item) {
+                    SwatchTile(title: item.title, subtitle: item.promptDetails, colors: item.swatch, isSelected: style == item) {
                         Haptics.tap()
                         style = item
                     }
@@ -147,58 +147,11 @@ private struct RoomTile: View {
                     .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 18)
+            .padding(.top, 26)
+            .padding(.bottom, 16)
             .background(
-                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+                UnevenRoundedRectangle(topLeadingRadius: 48, bottomLeadingRadius: 14, bottomTrailingRadius: 14, topTrailingRadius: 48, style: .continuous)
                     .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
-            )
-        }
-        .buttonStyle(.pressable)
-        .animation(Theme.snappy, value: isSelected)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-private struct StyleTile: View {
-    let style: InteriorStyle
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                LinearGradient(
-                    colors: [Color(hex: style.swatch.0) ?? .gray, Color(hex: style.swatch.1) ?? .black],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .frame(height: 90)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(alignment: .topTrailing) {
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, Color.accentColor)
-                            .font(.title2)
-                            .padding(8)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                Text(style.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                Text(style.promptDetails)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
             )
         }
         .buttonStyle(.pressable)

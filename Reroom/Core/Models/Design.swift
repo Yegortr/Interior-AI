@@ -31,6 +31,7 @@ final class Design {
     var id: UUID = UUID()
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    var kindRaw: String = DesignKind.interior.rawValue
 
     var roomTypeRaw: String = RoomType.livingRoom.rawValue
     var styleRaw: String = InteriorStyle.modern.rawValue
@@ -50,6 +51,15 @@ final class Design {
     var isFavorite: Bool = false
     /// Set when this design was made with "Make Changes" from another one.
     var parentId: UUID?
+
+    // Garden only.
+    var gardenStyleRaw: String?
+    var locationName: String?
+    /// JSON-encoded `[Plant]` recommended for this garden.
+    var plantsData: Data?
+    var designNotes: String?
+    /// JSON-encoded `GardenContext`, kept so a garden can be retried with the same answers.
+    var gardenContextData: Data?
 
     @Attribute(.externalStorage) var originalImageData: Data?
     @Attribute(.externalStorage) var resultImageData: Data?
@@ -72,7 +82,23 @@ final class Design {
         set { statusRaw = newValue.rawValue; updatedAt = Date() }
     }
 
+    var kind: DesignKind { DesignKind(rawValue: kindRaw) ?? .interior }
     var roomType: RoomType { RoomType(rawValue: roomTypeRaw) ?? .livingRoom }
+    var gardenStyle: GardenStyle? { gardenStyleRaw.flatMap(GardenStyle.init(rawValue:)) }
+
+    /// "Japandi" for rooms, "Mediterranean" for gardens.
+    var styleTitle: String { kind == .garden ? (gardenStyle?.title ?? "Garden") : style.title }
+    /// "Bedroom" / "Garden".
+    var subjectTitle: String { kind == .garden ? "Garden" : roomType.title }
+
+    var gardenContext: GardenContext? {
+        gardenContextData.flatMap { try? JSONDecoder().decode(GardenContext.self, from: $0) }
+    }
+
+    var plants: [Plant] {
+        get { plantsData.flatMap { try? JSONDecoder().decode([Plant].self, from: $0) } ?? [] }
+        set { plantsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
     var style: InteriorStyle { InteriorStyle(rawValue: styleRaw) ?? .modern }
 
     var aspectRatio: AspectRatio {
@@ -81,4 +107,13 @@ final class Design {
     }
 
     var isRetryable: Bool { status == .failed || status == .stale }
+
+    static func garden(_ context: GardenContext, originalImageData: Data, aspectRatio: AspectRatio) -> Design {
+        let design = Design(roomType: .livingRoom, style: .modern, notes: context.notes, originalImageData: originalImageData, aspectRatio: aspectRatio)
+        design.kindRaw = DesignKind.garden.rawValue
+        design.gardenStyleRaw = context.style.rawValue
+        design.locationName = context.location.name
+        design.gardenContextData = try? JSONEncoder().encode(context)
+        return design
+    }
 }

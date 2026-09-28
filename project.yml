@@ -39,9 +39,10 @@ targets:
         UIBackgroundModes:
           - remote-notification
         ITSAppUsesNonExemptEncryption: false
-        NSCameraUsageDescription: Reroom uses the camera to photograph the room you want to redesign.
-        NSPhotoLibraryUsageDescription: Reroom lets you pick a photo of the room you want to redesign.
+        NSCameraUsageDescription: Reroom uses the camera to photograph the room or garden you want to redesign.
+        NSPhotoLibraryUsageDescription: Reroom lets you pick a photo of the room or garden you want to redesign.
         NSPhotoLibraryAddUsageDescription: Reroom saves your designs to your photo library.
+        NSLocationWhenInUseUsageDescription: Reroom uses your approximate location to recommend plants that thrive in your climate.
         SUPABASE_URL: "$(SUPABASE_URL)"
         SUPABASE_ANON_KEY: "$(SUPABASE_ANON_KEY)"
     entitlements:

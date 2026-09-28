@@ -16,8 +16,8 @@ actor MockGenerationAPI: GenerationAPI {
 
     func setStartError(_ error: Error?) { startError = error }
     func setDownload(_ data: Data) { downloadData = data }
-    func setRow(_ id: UUID, _ status: JobStatus, url: URL? = nil, error: String? = nil) {
-        rows[id] = JobRow(id: id, status: status, resultUrl: url, errorMessage: error)
+    func setRow(_ id: UUID, _ status: JobStatus, url: URL? = nil, error: String? = nil, plants: [Plant]? = nil, notes: String? = nil) {
+        rows[id] = JobRow(id: id, status: status, resultUrl: url, errorMessage: error, plants: plants, designNotes: notes)
     }
 
     func uploadPhoto(_ jpeg: Data) async throws -> String {
@@ -178,6 +178,49 @@ final class GenerationCoordinatorTests: XCTestCase {
         XCTAssertTrue(edit?.prompt.contains("add plants") == true)
     }
 
+    private func gardenContext() -> GardenContext {
+        GardenContext(
+            location: GardenLocation(name: "Lisbon, Portugal", latitude: 38.7223, longitude: -9.1393),
+            month: 4, sunlight: .fullSun, style: .mediterranean, maintenance: .low,
+            petSafe: true, hardscaping: [.patio], notes: "keep the lemon tree"
+        )
+    }
+
+    func testGardenSendsContextAndStoresPlantsBeforeImage() async throws {
+        let coordinator = makeCoordinator()
+        let design = coordinator.createGarden(gardenContext(), photo: photo(width: 4000, height: 3000))
+        XCTAssertEqual(design.kind, .garden)
+        XCTAssertEqual(design.locationName, "Lisbon, Portugal")
+        XCTAssertEqual(design.gardenContext?.location.latitude, 38.7, "Coordinates are coarsened")
+        await coordinator.submit(design)
+
+        let request = try XCTUnwrap(await api.requests.last)
+        XCTAssertEqual(request.kind, .garden)
+        XCTAssertEqual(request.garden?.style, .mediterranean)
+        XCTAssertTrue(request.garden?.petSafe == true)
+
+        let lavender = Plant(name: "Lavender", scientificName: "Lavandula stoechas", petSafe: true, careTips: ["Prune after flowering"])
+        await api.setRow(try XCTUnwrap(design.jobId), .processing, plants: [lavender], notes: "Drought-tolerant planting")
+        await coordinator.pollOnce()
+        XCTAssertEqual(design.plants, [lavender])
+        XCTAssertEqual(design.designNotes, "Drought-tolerant planting")
+        XCTAssertEqual(design.status, .generating)
+    }
+
+    func testEditOfGardenKeepsPlantsAndDoesNotRequestNewOnes() async throws {
+        let coordinator = makeCoordinator()
+        let source = coordinator.createGarden(gardenContext(), photo: photo())
+        source.plants = [Plant(name: "Olive")]
+        source.resultImageData = Data([7])
+        source.status = .completed
+        let edit = try XCTUnwrap(coordinator.makeChanges(from: source, change: "add a bench"))
+        XCTAssertEqual(edit.kind, .garden)
+        XCTAssertEqual(edit.plants.map(\.name), ["Olive"])
+        await coordinator.submit(edit)
+        let request = try XCTUnwrap(await api.requests.last)
+        XCTAssertNil(request.garden)
+    }
+
     func testPollingStopsWhenNothingPending() async throws {
         let coordinator = makeCoordinator(interval: .milliseconds(20))
         let design = await submitted(coordinator)
@@ -219,6 +262,27 @@ final class PureLogicTests: XCTestCase {
     func testAspectRatioParsing() {
         XCTAssertEqual(AspectRatio(pixelWidth: 4032, pixelHeight: 3024)?.stringValue, "4:3")
         XCTAssertEqual(AspectRatio(string: "9:16"), .portrait)
+    }
+
+    func testGardenPrompt() {
+        let context = GardenContext(
+            location: GardenLocation(name: "Austin, Texas"), month: 6, sunlight: .partialSun, style: .desert,
+            maintenance: .low, petSafe: true, hardscaping: [.pathway, .firePit], notes: ""
+        )
+        let prompt = PromptBuilder.garden(context)
+        XCTAssertTrue(prompt.contains("Desert garden"))
+        XCTAssertTrue(prompt.contains("Austin, Texas"))
+        XCTAssertTrue(prompt.contains("pathway, fire pit"))
+        XCTAssertTrue(prompt.contains("safe for cats and dogs"))
+    }
+
+    func testJobRowWithPlantsIsLenient() throws {
+        let json = #"[{"id":"\#(UUID().uuidString)","status":"processing","plants":[{"name":"Rosemary","petSafe":true,"careTips":["Full sun"]},{"noName":true},{"name":"Agave","careTips":null,"imageUrl":"https://x.supabase.co/p/agave.jpg"}],"design_notes":"Dry garden"}]"#
+        let row = try XCTUnwrap(try JSONDecoder().decode([JobRow].self, from: Data(json.utf8)).first)
+        XCTAssertEqual(row.plants?.map(\.name), ["Rosemary", "Agave"])
+        XCTAssertEqual(row.plants?.last?.careTips, [])
+        XCTAssertEqual(row.plants?.last?.imageUrl?.lastPathComponent, "agave.jpg")
+        XCTAssertEqual(row.designNotes, "Dry garden")
     }
 
     func testJobRowDecoding() throws {

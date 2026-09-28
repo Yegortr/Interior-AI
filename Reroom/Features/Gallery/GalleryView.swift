@@ -6,18 +6,41 @@ struct GalleryView: View {
     @Environment(GenerationCoordinator.self) private var coordinator
 
     @AppStorage("gallery.columnCount") private var columnCount = 2
-    @State private var favoritesOnly = false
-    @State private var showCreate = false
+    @State private var filter: Filter = .all
+    @State private var creating: DesignKind?
     @State private var showSettings = false
     @State private var designToDelete: Design?
 
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All", rooms = "Rooms", gardens = "Gardens", favorites = "Favorites"
+        var id: String { rawValue }
+    }
+
     private var visible: [Design] {
-        favoritesOnly ? designs.filter(\.isFavorite) : designs
+        switch filter {
+        case .all: designs
+        case .rooms: designs.filter { $0.kind == .interior }
+        case .gardens: designs.filter { $0.kind == .garden }
+        case .favorites: designs.filter(\.isFavorite)
+        }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        StartCard(kind: .interior) { start(.interior) }
+                        StartCard(kind: .garden) { start(.garden) }
+                    }
+                    .padding(.horizontal, Theme.horizontalPadding)
+
+                    if !designs.isEmpty {
+                        filterBar
+                    }
+                }
+                .padding(.top, 4)
+
                 if visible.isEmpty {
                     emptyState
                 } else {
@@ -27,21 +50,13 @@ struct GalleryView: View {
                         .padding(.bottom, 24)
                 }
             }
-            .navigationTitle(favoritesOnly ? "Favorites" : "Reroom")
+            .navigationTitle("Reroom")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("Settings")
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        withAnimation(Theme.spring) { favoritesOnly.toggle() }
-                    } label: {
-                        Image(systemName: favoritesOnly ? "heart.fill" : "heart")
-                            .contentTransition(.symbolEffect(.replace))
-                    }
-                    .accessibilityLabel(favoritesOnly ? "Show all designs" : "Show favorites")
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Haptics.tap()
                         withAnimation(Theme.spring) { columnCount = columnCount == 2 ? 1 : 2 }
@@ -52,22 +67,14 @@ struct GalleryView: View {
                     .accessibilityLabel(columnCount == 2 ? "One column" : "Two columns")
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                Button {
-                    Haptics.tap()
-                    showCreate = true
-                } label: {
-                    Label("New Design", systemImage: "plus")
-                }
-                .buttonStyle(.primary)
-                .padding(.horizontal, Theme.horizontalPadding)
-                .padding(.bottom, 8)
-            }
             .navigationDestination(for: Design.self) { design in
                 DesignDetailView(design: design)
             }
-            .fullScreenCover(isPresented: $showCreate) {
-                CreateFlowView()
+            .fullScreenCover(item: $creating) { kind in
+                switch kind {
+                case .interior: CreateFlowView()
+                case .garden: GardenFlowView()
+                }
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
@@ -135,15 +142,85 @@ struct GalleryView: View {
         .transition(.scale(scale: 0.96).combined(with: .opacity))
     }
 
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Filter.allCases) { option in
+                    Button {
+                        guard option != filter else { return }
+                        Haptics.tap()
+                        withAnimation(Theme.spring) { filter = option }
+                    } label: {
+                        Chip(title: option.rawValue, isSelected: filter == option)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Theme.horizontalPadding)
+        }
+    }
+
+    private func start(_ kind: DesignKind) {
+        Haptics.tap()
+        creating = kind
+    }
+
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(favoritesOnly ? "No favorites yet" : "Redesign your first room",
-                  systemImage: favoritesOnly ? "heart" : "sparkles")
+            Label(filter == .favorites ? "No favorites yet" : "Your designs appear here",
+                  systemImage: filter == .favorites ? "heart" : "sparkles")
         } description: {
-            Text(favoritesOnly
+            Text(filter == .favorites
                  ? "Tap the heart on a design to keep it here."
-                 : "Take a photo of a room, pick a style, and see it transformed.")
+                 : "Take a photo of a room or garden, pick a style, and see it transformed.")
         }
-        .padding(.top, 80)
+        .padding(.top, 24)
+    }
+}
+
+extension DesignKind: Identifiable {
+    var id: String { rawValue }
+}
+
+/// Big entry card on the home screen (Realtor.com / IKEA-style "add a photo to redesign").
+private struct StartCard: View {
+    let kind: DesignKind
+    let action: () -> Void
+
+    private var colors: [Color] {
+        kind == .interior
+            ? [Color(hex: "#E9DFD3") ?? .brown, Color(hex: "#B08B6E") ?? .brown]
+            : [Color(hex: "#DCEBD0") ?? .green, Color(hex: "#5E8C4A") ?? .green]
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: kind == .interior ? "sofa.fill" : "leaf.fill")
+                    .font(.title)
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(Circle().fill(.white.opacity(0.25)))
+                Spacer(minLength: 12)
+                Text(kind == .interior ? "Redesign\na room" : "Design\na garden")
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.leading)
+                Label("Add photo", systemImage: "camera.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(.white.opacity(0.25)))
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
+            .background(
+                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+            )
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel(kind == .interior ? "Redesign a room" : "Design a garden")
     }
 }
