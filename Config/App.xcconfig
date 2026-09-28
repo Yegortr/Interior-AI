@@ -1,0 +1,7 @@
+// Real values live in Config/Secrets.xcconfig (git-ignored); ./scripts/run-on-iphone.sh creates it.
+// "//" starts a comment in xcconfig files, so URLs are written as https:/$()/host.
+
+SUPABASE_URL = https:/$()/your-project.supabase.co
+SUPABASE_ANON_KEY =
+
+#include? "Secrets.xcconfig"
