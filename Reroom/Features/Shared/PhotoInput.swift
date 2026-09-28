@@ -37,12 +37,14 @@ struct PickedPhoto: Identifiable, Equatable {
 }
 
 /// Photo picking as native Form rows: preview, "Choose from Library" and "Take Photo".
+///
+/// Modifiers are attached to individual rows, never to the `Section`: SwiftUI applies Section
+/// modifiers to every row, which would duplicate change handlers and presentations.
 struct PhotoSection: View {
     @Binding var photo: PickedPhoto?
     let footer: String
 
     @State private var libraryItem: PhotosPickerItem?
-    @State private var showCamera = false
     @State private var isLoading = false
 
     var body: some View {
@@ -54,7 +56,6 @@ struct PhotoSection: View {
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-                    .transition(.opacity)
             }
             PhotosPicker(selection: $libraryItem, matching: .images) {
                 HStack {
@@ -63,9 +64,29 @@ struct PhotoSection: View {
                     if isLoading { ProgressView() }
                 }
             }
+            .onChange(of: libraryItem) { _, item in
+                guard let item else { return }
+                Task {
+                    isLoading = true
+                    defer { isLoading = false; libraryItem = nil }
+                    if let picked = await PickedPhoto.load(from: item) {
+                        withAnimation(.smooth) { photo = picked }
+                    }
+                }
+            }
+            .sensoryFeedback(.success, trigger: photo?.id)
+
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                 Button {
-                    showCamera = true
+                    CameraPresenter.shared.present { image in
+                        Task {
+                            isLoading = true
+                            defer { isLoading = false }
+                            if let picked = await PickedPhoto.make(from: image) {
+                                withAnimation(.smooth) { photo = picked }
+                            }
+                        }
+                    }
                 } label: {
                     Label("Take Photo", systemImage: "camera")
                 }
@@ -73,57 +94,48 @@ struct PhotoSection: View {
         } footer: {
             Text(footer)
         }
-        .animation(.default, value: photo)
-        .onChange(of: libraryItem) { _, item in
-            guard let item else { return }
-            Task {
-                isLoading = true
-                defer { isLoading = false; libraryItem = nil }
-                if let picked = await PickedPhoto.load(from: item) { photo = picked }
-            }
-        }
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker { image in
-                Task {
-                    isLoading = true
-                    defer { isLoading = false }
-                    photo = await PickedPhoto.make(from: image)
-                }
-            }
-            .ignoresSafeArea()
-        }
-        .sensoryFeedback(.success, trigger: photo?.id)
     }
 }
 
-/// `UIImagePickerController` camera wrapper.
-struct CameraPicker: UIViewControllerRepresentable {
-    let onCapture: (UIImage) -> Void
-    @Environment(\.dismiss) private var dismiss
+/// Presents the system camera modally from the top-most view controller and dismisses only
+/// itself — independent of SwiftUI presentation state, so it can never close the flow behind it.
+@MainActor
+final class CameraPresenter: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    static let shared = CameraPresenter()
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
+    private var onCapture: ((UIImage) -> Void)?
+
+    func present(onCapture: @escaping (UIImage) -> Void) {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera), let presenter = Self.topViewController() else { return }
+        self.onCapture = onCapture
         let picker = UIImagePickerController()
         picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        return picker
+        picker.delegate = self
+        presenter.present(picker, animated: true)
     }
 
-    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        private let parent: CameraPicker
-
-        init(_ parent: CameraPicker) { self.parent = parent }
-
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let image = info[.originalImage] as? UIImage { parent.onCapture(image) }
-            parent.dismiss()
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        let image = info[.originalImage] as? UIImage
+        let handler = onCapture
+        onCapture = nil
+        picker.dismiss(animated: true) {
+            if let image { handler?(image) }
         }
+    }
 
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.dismiss()
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        onCapture = nil
+        picker.dismiss(animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        var top = scene?.keyWindow?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+            top = presented
         }
+        return top
     }
 }

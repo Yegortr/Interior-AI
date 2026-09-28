@@ -205,6 +205,7 @@ private struct LocationSection: View {
                     }
                     .buttonStyle(.borderless)
                 }
+                .sensoryFeedback(.success, trigger: location)
             } else {
                 Button {
                     Task { await locate() }
@@ -240,7 +241,6 @@ private struct LocationSection: View {
         } footer: {
             Text(errorMessage ?? "We pick plants that thrive in your climate. Only your approximate area is used — never your address.")
         }
-        .sensoryFeedback(.success, trigger: location)
     }
 
     private func locate() async {
