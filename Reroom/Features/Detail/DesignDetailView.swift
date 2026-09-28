@@ -1,73 +1,79 @@
 import SwiftUI
 
-/// Photos-style viewer — the design fills the screen.
-/// - opened from the grid with the system zoom transition; swipe down to go back
-/// - tap hides the bars (background turns black), pinch / double-tap to zoom
-/// - press and hold shows the original photo, like comparing edits in Photos
-/// - bottom bar: Share (incl. Save Image), Favorite, Compare, Info, Delete; "Edit" = Make Changes
 struct DesignDetailView: View {
     let design: Design
 
     @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
 
+    @State private var mode: Mode = .design
     @State private var result: UIImage?
     @State private var original: UIImage?
-    @State private var chromeHidden = false
-    @State private var showingOriginal = false
-    @State private var showInfo = false
+    /// Pushes the Photos-style viewer, zooming out of the hero image.
+    @State private var showViewer = false
+    @Namespace private var heroNamespace
     @State private var showMakeChanges = false
     @State private var confirmDelete = false
+    @State private var saveState: SaveState = .idle
+    @State private var saveError: String?
 
-    private var isCompleted: Bool { design.status == .completed }
-
-    private var displayed: UIImage? {
-        showingOriginal ? (original ?? result) : result
-    }
+    private enum Mode: String, CaseIterable { case design = "Design", compare = "Before & After" }
+    private enum SaveState: Equatable { case idle, saving, saved }
 
     var body: some View {
-        ZStack {
-            (chromeHidden ? Color.black : Color(.systemBackground))
-                .ignoresSafeArea()
-
-            if isCompleted, let displayed {
-                PhotoZoomView(
-                    image: displayed,
-                    onTap: { withAnimation(.easeInOut(duration: 0.2)) { chromeHidden.toggle() } },
-                    onPress: { pressed in if original != nil { showingOriginal = pressed } }
-                )
-                .ignoresSafeArea()
-                .accessibilityLabel(showingOriginal ? "Original photo" : "\(design.styleTitle) \(design.subjectTitle) design")
-            } else {
-                pending
-            }
-
-            if showingOriginal {
-                VStack {
-                    Text("Original")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.thinMaterial, in: Capsule())
-                        .padding(.top, 8)
-                    Spacer()
+        List {
+            Section {
+                hero
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            } footer: {
+                if design.status == .completed, original != nil {
+                    Picker("View", selection: $mode) {
+                        ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.top, 12)
                 }
-                .transition(.opacity)
-                .allowsHitTesting(false)
+            }
+
+            Section("Details") {
+                if design.kind == .garden {
+                    LabeledContent("Space") { Label("Garden", systemImage: "leaf") }
+                    if let place = design.locationName {
+                        LabeledContent("Location") { Label(place, systemImage: "mappin.and.ellipse") }
+                    }
+                } else {
+                    LabeledContent("Room") { Label(design.roomType.title, systemImage: design.roomType.symbol) }
+                }
+                LabeledContent("Style", value: design.styleTitle)
+                LabeledContent("Created") {
+                    Text(design.createdAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+
+            if !design.notes.isEmpty {
+                Section(design.parentId == nil ? "Your Wishes" : "Requested Change") {
+                    Text(design.notes)
+                }
+            }
+
+            if design.kind == .garden {
+                gardenSections
+            }
+
+            if let saveError {
+                Section {
+                    Label(saveError, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                }
             }
         }
-        .animation(.easeInOut(duration: 0.15), value: showingOriginal)
+        .listStyle(.insetGrouped)
+        .navigationTitle(design.styleTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: Plant.self) { plant in
+            PlantDetailView(plant: plant, locationName: design.locationName)
+        }
         .toolbar { toolbar }
-        .toolbarBackground(.visible, for: .navigationBar, .bottomBar)
-        .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar, .bottomBar)
-        .statusBarHidden(chromeHidden)
-        .sheet(isPresented: $showInfo) {
-            DesignInfoSheet(design: design)
-        }
-        .sheet(isPresented: $showMakeChanges) {
-            MakeChangesSheet(design: design) { dismiss() }
-        }
         .confirmationDialog("Delete this design?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Design", role: .destructive) {
                 dismiss()
@@ -77,25 +83,101 @@ struct DesignDetailView: View {
         } message: {
             Text("It will be removed from all your devices.")
         }
+        .sheet(isPresented: $showMakeChanges) {
+            MakeChangesSheet(design: design) { dismiss() }
+        }
+        .navigationDestination(isPresented: $showViewer) {
+            if let result {
+                PhotoViewer(design: design, result: result, original: original)
+                    .navigationTransition(.zoom(sourceID: "hero", in: heroNamespace))
+            }
+        }
+        .sensoryFeedback(.selection, trigger: mode)
         .sensoryFeedback(.impact(weight: .medium), trigger: design.isFavorite)
-        .sensoryFeedback(.impact(weight: .light), trigger: showingOriginal)
+        .sensoryFeedback(.success, trigger: saveState) { _, new in new == .saved }
         .task(id: design.statusRaw) { await loadImages() }
     }
 
-    // MARK: Pending
+    // MARK: Hero
 
-    private var pending: some View {
-        ZStack {
-            if let original {
-                Image(uiImage: original)
-                    .resizable()
-                    .scaledToFit()
-                    .blur(radius: 20)
-                    .opacity(0.5)
-                    .ignoresSafeArea()
+    @ViewBuilder
+    private var hero: some View {
+        if design.status != .completed {
+            Color.clear
+                .aspectRatio(design.aspectRatio.value, contentMode: .fit)
+                .overlay {
+                    ZStack {
+                        DesignImage(design: design, kind: .original, maxPixelSize: 1200)
+                            .blur(radius: 14)
+                            .opacity(0.45)
+                        Rectangle().fill(.ultraThinMaterial)
+                        PendingStatusView(design: design, compact: false).padding(24)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else if mode == .compare, let result, let original {
+            BeforeAfterSlider(before: original, after: result, aspectRatio: design.aspectRatio.value)
+                .transition(.opacity)
+        } else {
+            Button {
+                showViewer = true
+            } label: {
+                Color.clear
+                    .aspectRatio(design.aspectRatio.value, contentMode: .fit)
+                    .overlay {
+                        if let result {
+                            Image(uiImage: result).resizable().scaledToFill()
+                        } else {
+                            Rectangle().fill(.quaternary)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            PendingStatusView(design: design, compact: false)
-                .padding(32)
+            .buttonStyle(.plain)
+            .matchedTransitionSource(id: "hero", in: heroNamespace)
+            .accessibilityLabel("Open full screen")
+            .transition(.opacity)
+        }
+    }
+
+    // MARK: Garden
+
+    @ViewBuilder
+    private var gardenSections: some View {
+        if let notes = design.designNotes, !notes.isEmpty {
+            Section("Design Notes") {
+                Text(notes)
+            }
+        }
+        let plants = design.plants
+        if plants.isEmpty {
+            if design.status.isInProgress {
+                Section("Plants") {
+                    Label {
+                        Text("Choosing plants for \(design.locationName ?? "your climate")…")
+                            .foregroundStyle(.secondary)
+                    } icon: {
+                        Image(systemName: "leaf.fill")
+                            .foregroundStyle(.green)
+                            .symbolEffect(.breathe)
+                    }
+                }
+            }
+        } else {
+            Section {
+                ForEach(plants) { plant in
+                    NavigationLink(value: plant) {
+                        PlantRow(plant: plant)
+                    }
+                }
+            } header: {
+                Text("Plants")
+            } footer: {
+                if let place = design.locationName {
+                    Text("Picked to thrive in \(place).")
+                }
+            }
         }
     }
 
@@ -103,154 +185,91 @@ struct DesignDetailView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
-            VStack(spacing: 0) {
-                Text("\(design.styleTitle) \(design.subjectTitle)")
-                    .font(.headline)
-                Text(design.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
         ToolbarItem(placement: .topBarTrailing) {
-            if isCompleted {
-                Button("Edit") { showMakeChanges = true }
-            } else if design.isRetryable {
-                Button("Retry") { coordinator.retry(design) }
+            Menu {
+                if design.isRetryable {
+                    Button { coordinator.retry(design) } label: { Label("Try Again", systemImage: "arrow.clockwise") }
+                }
+                if result != nil {
+                    Button { showViewer = true } label: { Label("View Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") }
+                }
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
             }
         }
-        ToolbarItemGroup(placement: .bottomBar) {
-            if let result, isCompleted {
-                ShareLink(
-                    item: Image(uiImage: result),
-                    preview: SharePreview("\(design.styleTitle) \(design.subjectTitle)", image: Image(uiImage: result))
-                )
-            } else {
-                Image(systemName: "square.and.arrow.up").foregroundStyle(.tertiary)
+        if design.status == .completed {
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button {
+                    design.isFavorite.toggle()
+                } label: {
+                    Image(systemName: design.isFavorite ? "heart.fill" : "heart")
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: design.isFavorite)
+                }
+                .tint(design.isFavorite ? .pink : nil)
+                .accessibilityLabel(design.isFavorite ? "Unfavorite" : "Favorite")
+
+                Spacer()
+
+                Button {
+                    Task { await saveToPhotos() }
+                } label: {
+                    Image(systemName: saveState == .saved ? "checkmark.circle.fill" : "square.and.arrow.down")
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.pulse, isActive: saveState == .saving)
+                }
+                .disabled(saveState == .saving)
+                .accessibilityLabel("Save to Photos")
+
+                Spacer()
+
+                if let result {
+                    ShareLink(item: Image(uiImage: result), preview: SharePreview("Reroom design", image: Image(uiImage: result)))
+                }
+
+                Spacer()
+
+                Button {
+                    showMakeChanges = true
+                } label: {
+                    Label("Make Changes", systemImage: "wand.and.sparkles")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
             }
-            Spacer()
-            Button {
-                design.isFavorite.toggle()
-            } label: {
-                Image(systemName: design.isFavorite ? "heart.fill" : "heart")
-                    .contentTransition(.symbolEffect(.replace))
-                    .symbolEffect(.bounce, value: design.isFavorite)
-            }
-            .disabled(!isCompleted)
-            .accessibilityLabel(design.isFavorite ? "Unfavorite" : "Favorite")
-            Spacer()
-            Button {
-                showingOriginal.toggle()
-            } label: {
-                Image(systemName: showingOriginal ? "square.split.2x1.fill" : "square.split.2x1")
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .disabled(!isCompleted || original == nil)
-            .accessibilityLabel(showingOriginal ? "Show design" : "Show original")
-            Spacer()
-            Button {
-                showInfo = true
-            } label: {
-                Image(systemName: "info.circle")
-            }
-            .accessibilityLabel("Info")
-            Spacer()
-            Button(role: .destructive) {
-                confirmDelete = true
-            } label: {
-                Image(systemName: "trash")
-            }
-            .accessibilityLabel("Delete")
         }
     }
 
-    // MARK: Images
+    // MARK: Actions
 
     private func loadImages() async {
+        if let data = design.resultImageData {
+            result = await LocalImageCache.shared.image(key: "\(design.id)-result-full", data: data, maxPixelSize: 3072)
+        }
         if let data = design.originalImageData {
             original = await LocalImageCache.shared.image(key: "\(design.id)-original-full", data: data, maxPixelSize: 3072)
         }
-        if let data = design.resultImageData {
-            let loaded = await LocalImageCache.shared.image(key: "\(design.id)-result-full", data: data, maxPixelSize: 3072)
-            withAnimation(.smooth) { result = loaded }
+    }
+
+    private func saveToPhotos() async {
+        guard let data = design.resultImageData else { return }
+        saveState = .saving
+        saveError = nil
+        do {
+            try await PhotoLibrarySaver.save(imageData: data)
+            withAnimation { saveState = .saved }
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation { saveState = .idle }
+        } catch {
+            saveState = .idle
+            saveError = error.localizedDescription
         }
     }
 }
 
-/// Photos-style Info panel: details, wishes and — for gardens — the regional plants.
-struct DesignInfoSheet: View {
-    let design: Design
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    if design.kind == .garden {
-                        LabeledContent("Space") { Label("Garden", systemImage: "leaf") }
-                        if let place = design.locationName {
-                            LabeledContent("Location") { Label(place, systemImage: "mappin.and.ellipse") }
-                        }
-                    } else {
-                        LabeledContent("Room") { Label(design.roomType.title, systemImage: design.roomType.symbol) }
-                    }
-                    LabeledContent("Style", value: design.styleTitle)
-                    LabeledContent("Created", value: design.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    if design.isFavorite {
-                        LabeledContent("Favorite") { Image(systemName: "heart.fill").foregroundStyle(.pink) }
-                    }
-                }
-
-                if !design.notes.isEmpty {
-                    Section(design.parentId == nil ? "Your Wishes" : "Requested Change") {
-                        Text(design.notes)
-                    }
-                }
-
-                if design.kind == .garden {
-                    if let notes = design.designNotes, !notes.isEmpty {
-                        Section("Design Notes") { Text(notes) }
-                    }
-                    let plants = design.plants
-                    if plants.isEmpty {
-                        if design.status.isInProgress {
-                            Section("Plants") {
-                                Label {
-                                    Text("Choosing plants for \(design.locationName ?? "your climate")…")
-                                        .foregroundStyle(.secondary)
-                                } icon: {
-                                    Image(systemName: "leaf.fill").foregroundStyle(.green).symbolEffect(.breathe)
-                                }
-                            }
-                        }
-                    } else {
-                        Section {
-                            ForEach(plants) { plant in
-                                NavigationLink(value: plant) { PlantRow(plant: plant) }
-                            }
-                        } header: {
-                            Text("Plants")
-                        } footer: {
-                            if let place = design.locationName { Text("Picked to thrive in \(place).") }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Info")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: Plant.self) { plant in
-                PlantDetailView(plant: plant, locationName: design.locationName)
-            }
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-    }
-}
-
+/// Describe a change; a new design is generated from this result.
 struct MakeChangesSheet: View {
     let design: Design
     var onSubmitted: () -> Void = {}

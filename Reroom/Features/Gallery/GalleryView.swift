@@ -51,6 +51,8 @@ struct GalleryView: View {
             }
             .navigationTitle(filter == .all ? "Reroom" : filter.rawValue)
             .toolbar { toolbar }
+            // Pushed screens own a bottom bar; make sure it never lingers on the grid after going back.
+            .toolbar(.hidden, for: .bottomBar)
             .navigationDestination(for: Design.self) { design in
                 DesignDetailView(design: design)
                     .navigationTransition(.zoom(sourceID: design.id, in: zoom))
