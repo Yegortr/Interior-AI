@@ -6,12 +6,14 @@
 // 4. In the background (EdgeRuntime.waitUntil) calls Runware with a signed URL of the source photo
 //    and stores the resulting image URL on the job. The app polls the job and downloads the image.
 //
-// Gardens: before rendering, Gemini looks at the photo and the user's region/season and picks
-// plants that thrive there; each plant gets a cached product shot (quotes stripped from names so
-// the model never paints lettering). Plants are written to the job as soon as they're chosen.
+// Gardens: before rendering, an LLM (Gemini through Runware's textInference) looks at the photo
+// and the user's region/season and picks plants that thrive there; each plant gets a cached
+// product shot (quotes stripped from names so the model never paints lettering). Plants are
+// written to the job as soon as they're chosen.
 //
-// Secrets: RUNWARE_API_KEY (required), GEMINI_API_KEY (gardens), RUNWARE_MODEL, RUNWARE_PLANT_MODEL,
-// GEMINI_MODEL, DAILY_LIMIT (optional).
+// Everything goes through ONE provider: Runware (images + LLM).
+// Secrets: RUNWARE_API_KEY (required); optional RUNWARE_MODEL, RUNWARE_PLANT_MODEL,
+// RUNWARE_LLM_MODEL, DAILY_LIMIT.
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
@@ -22,7 +24,8 @@ const MODEL = Deno.env.get("RUNWARE_MODEL") ?? "google:4@1";
 const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "30");
 // Fast, cheap text-to-image model for plant product shots.
 const PLANT_MODEL = Deno.env.get("RUNWARE_PLANT_MODEL") ?? "runware:100@1";
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+// Multimodal LLM on Runware used for plant picks.
+const LLM_MODEL = Deno.env.get("RUNWARE_LLM_MODEL") ?? "google:gemini@3.1-flash-lite";
 const PLANT_SUFFIX = "No text, no labels, no watermarks, professional botanical product photography on solid background";
 
 // Sizes accepted by the Gemini image models; others take any multiple of 64.
@@ -151,7 +154,7 @@ async function runJob(
     let prompt = input.prompt;
     let plants: Plant[] = [];
 
-    if (input.garden && Deno.env.get("GEMINI_API_KEY")) {
+    if (input.garden) {
       try {
         const plan = await recommendPlants(input.imageUrl, input.garden);
         plants = plan.plants;
@@ -180,6 +183,24 @@ async function runJob(
   }
 }
 
+/** Sends one task to Runware and returns its first result object. */
+async function runware(task: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const response = await fetch(RUNWARE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${Deno.env.get("RUNWARE_API_KEY")}`,
+    },
+    body: JSON.stringify([{ taskUUID: crypto.randomUUID(), ...task }]),
+  });
+  const payload = await response.json().catch(() => ({}));
+  const runwareError = payload?.errors?.[0]?.message ?? payload?.error;
+  if (!response.ok || runwareError) throw new Error(runwareError ?? `Runware HTTP ${response.status}`);
+  const result = (payload?.data ?? [])[0];
+  if (!result) throw new Error("Runware returned no result.");
+  return result;
+}
+
 async function runwareImage(task: {
   model: string;
   prompt: string;
@@ -187,30 +208,20 @@ async function runwareImage(task: {
   height: number;
   referenceImages?: string[];
 }): Promise<string> {
-  const response = await fetch(RUNWARE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${Deno.env.get("RUNWARE_API_KEY")}`,
-    },
-    body: JSON.stringify([{
+  const result = await runware({
       taskType: "imageInference",
       taskUUID: crypto.randomUUID(),
       model: task.model,
       positivePrompt: task.prompt,
       width: task.width,
       height: task.height,
-      ...(task.referenceImages?.length ? { referenceImages: task.referenceImages } : {}),
+      ...(task.referenceImages?.length ? { inputs: { referenceImages: task.referenceImages } } : {}),
       numberResults: 1,
       outputType: "URL",
       outputFormat: "JPEG",
-    }]),
   });
-  const payload = await response.json().catch(() => ({}));
-  const runwareError = payload?.errors?.[0]?.message ?? payload?.error;
-  if (!response.ok || runwareError) throw new Error(runwareError ?? `Runware HTTP ${response.status}`);
-  const url = (payload?.data ?? []).find((item: { imageURL?: string }) => item.imageURL)?.imageURL;
-  if (!url) throw new Error("The model returned no image.");
+  const url = result.imageURL;
+  if (typeof url !== "string") throw new Error("The model returned no image.");
   return url;
 }
 
@@ -221,10 +232,6 @@ async function recommendPlants(
   imageUrl: string,
   garden: GardenContext,
 ): Promise<{ plants: Plant[]; designNotes?: string; imagePrompt?: string }> {
-  const photo = await fetch(imageUrl);
-  if (!photo.ok) throw new Error(`photo HTTP ${photo.status}`);
-  const base64 = toBase64(new Uint8Array(await photo.arrayBuffer()));
-
   const latitude = garden.location.latitude;
   const hemisphere = latitude == null ? "unknown" : latitude >= 0 ? "northern" : "southern";
   const month = new Date(2000, Math.max(0, Math.min(11, (garden.month || 1) - 1)), 1)
@@ -250,60 +257,37 @@ Rules:
 - imagePrompt: one paragraph for an image model to redesign THIS photo as the new garden, featuring these
   plants placed sensibly, keeping the same camera angle, boundaries, house and fences. Photorealistic.
 - designNotes: 2–3 sentences summarising the design idea for the owner.
-Respond with JSON only.`;
+Respond with ONLY a JSON object, no markdown, in exactly this shape:
+{"designNotes": string, "imagePrompt": string, "plants": [{"name": string, "scientificName": string,
+ "reason": string, "sun": string, "water": string, "careLevel": string, "petSafe": boolean,
+ "hardiness": string, "height": string, "bloomSeason": string, "careTips": [string]}]}`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")! },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: instructions }, { inline_data: { mime_type: "image/jpeg", data: base64 } }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              designNotes: { type: "STRING" },
-              imagePrompt: { type: "STRING" },
-              plants: {
-                type: "ARRAY",
-                items: {
-                  type: "OBJECT",
-                  properties: {
-                    name: { type: "STRING" },
-                    scientificName: { type: "STRING" },
-                    reason: { type: "STRING" },
-                    sun: { type: "STRING" },
-                    water: { type: "STRING" },
-                    careLevel: { type: "STRING" },
-                    petSafe: { type: "BOOLEAN" },
-                    hardiness: { type: "STRING" },
-                    height: { type: "STRING" },
-                    bloomSeason: { type: "STRING" },
-                    careTips: { type: "ARRAY", items: { type: "STRING" } },
-                  },
-                  required: ["name", "scientificName", "reason", "sun", "water", "careLevel", "petSafe", "careTips"],
-                },
-              },
-            },
-            required: ["plants", "imagePrompt", "designNotes"],
-          },
-        },
-      }),
-    },
-  );
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.error?.message ?? `Gemini HTTP ${response.status}`);
-  const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned no content");
-  const plan = JSON.parse(text);
+  const result = await runware({
+    taskType: "textInference",
+    model: LLM_MODEL,
+    messages: [{ role: "user", content: instructions }],
+    inputs: { images: [imageUrl] },
+    settings: { maxTokens: 4096, temperature: 0.4 },
+  });
+  const plan = parseJSONObject(String(result.text ?? ""));
   const plants: Plant[] = (Array.isArray(plan.plants) ? plan.plants : [])
     .filter((p: Plant) => typeof p?.name === "string" && p.name.trim())
     .slice(0, 8);
   // Respect the pet-safe answer even if the model slips.
   const safe = garden.petSafe ? plants.filter((p) => p.petSafe !== false) : plants;
-  return { plants: safe, designNotes: plan.designNotes, imagePrompt: plan.imagePrompt };
+  return {
+    plants: safe,
+    designNotes: typeof plan.designNotes === "string" ? plan.designNotes : undefined,
+    imagePrompt: typeof plan.imagePrompt === "string" ? plan.imagePrompt : undefined,
+  };
+}
+
+/** LLMs sometimes wrap JSON in prose or ``` fences; take the outermost object. */
+export function parseJSONObject(text: string): Record<string, any> {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("LLM returned no JSON");
+  return JSON.parse(text.slice(start, end + 1));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -348,15 +332,6 @@ async function attachPlantImages(admin: SupabaseClient, plants: Plant[]): Promis
     const result = results[index];
     return result.status === "fulfilled" ? { ...plant, imageUrl: result.value } : plant;
   });
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
 }
 
 function friendlyError(error: unknown): string {

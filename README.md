@@ -22,13 +22,12 @@ git-ignored `Config/Secrets.xcconfig`. Manual route: `xcodegen generate && open 
    ```bash
    supabase link --project-ref <ref>
    supabase db push
-   supabase secrets set RUNWARE_API_KEY=<your Runware key>
-   supabase secrets set GEMINI_API_KEY=<Google AI Studio key>   # regional plant picks for gardens
+   supabase secrets set RUNWARE_API_KEY=<your Runware key>   # the only AI key: images + LLM
    supabase functions deploy generate
    ```
-   Optional secrets: `RUNWARE_MODEL` (default `google:4@1`, Nano Banana), `RUNWARE_PLANT_MODEL`
-   (default `runware:100@1`, used for plant product shots), `GEMINI_MODEL` (default `gemini-2.5-flash`),
-   `DAILY_LIMIT` (default 30). Without `GEMINI_API_KEY` gardens still render, just without plant picks.
+   Optional secrets: `RUNWARE_MODEL` (default `google:4@1`, Nano Banana — room/garden redesign),
+   `RUNWARE_PLANT_MODEL` (default `runware:100@1`, plant product shots), `RUNWARE_LLM_MODEL`
+   (default `google:gemini@3.1-flash-lite`, plant picks via Runware `textInference`), `DAILY_LIMIT` (default 30).
 
 ## How it works
 
@@ -45,8 +44,8 @@ GenerationCoordinator polls generation_jobs (only while something is pending)
   ratio (the photo's, then the real result's), so placeholders already have the final shape.
 * **Timeouts:** `stale` after 4 min (still polled, retry offered), `failed` after 10 min.
 * **Gardens:** photo → location ("Use my location" or a typed city; coordinates rounded to ~10 km)
-  → sunlight → style → care/pet-safety → extras. The server asks Gemini (with the photo, region and
-  month) for 6–8 plants suited to that climate, writes them to the job right away, then renders the
+  → sunlight → style → care/pet-safety → extras. The server asks Gemini through Runware `textInference` (with the photo, region
+  and month) for 6–8 plants suited to that climate, writes them to the job right away, then renders the
   garden with those plants while generating cached plant product shots in parallel (quotes stripped
   from names so the model never paints lettering).
 * **Detail:** before/after slider, UIKit fullscreen viewer (pinch to 5×, double-tap 2.5×,
