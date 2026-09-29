@@ -73,11 +73,8 @@ struct DesignImage: View {
         withAnimation(.easeOut(duration: 0.2)) { image = loaded }
     }
 
-    /// Keyed on the status rather than the data: the result arrives together with `.completed`,
-    /// and reading an external-storage blob just to build a key would pull every image in the
-    /// grid off disk on the main thread each time the grid refreshes.
     static func key(_ design: Design, _ kind: Kind, _ size: CGFloat) -> String {
-        let version = kind == .result ? design.statusRaw : "original"
-        return "\(design.id)-\(kind.rawValue)-\(Int(size))-\(version)"
+        let hasData = (kind == .result ? design.resultImageData : design.originalImageData) != nil
+        return "\(design.id)-\(kind.rawValue)-\(Int(size))-\(hasData)"
     }
 }

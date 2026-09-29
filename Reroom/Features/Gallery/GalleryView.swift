@@ -96,15 +96,12 @@ struct GalleryView: View {
     private var grid: some View {
         if columnCount == 2 {
             // Photos-style: edge to edge, hairline gutters.
-            // Deliberately NOT lazy: lazy containers recreate cells when data changes (e.g. while
-            // a generation is being polled), and a recreated cell mid-navigation makes the zoom
-            // transition lose its source and fly to/from the centre of the screen.
-            ColumnsLayout(columns: 2, spacing: 2) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)], spacing: 2) {
                 ForEach(visible) { cell($0, columns: 2) }
             }
             .animation(.smooth, value: visible.map(\.id))
         } else {
-            VStack(spacing: 16) {
+            LazyVStack(spacing: 16) {
                 ForEach(visible) { cell($0, columns: 1) }
             }
             .padding(.horizontal)
@@ -114,9 +111,14 @@ struct GalleryView: View {
 
     private func cell(_ design: Design, columns: Int) -> some View {
         NavigationLink(value: design) {
-            DesignCard(design: design, columns: columns, zoomNamespace: zoom)
+            DesignCard(design: design, columns: columns)
         }
         .buttonStyle(.plain)
+        // As in Apple's sample code: the zoom source is the link itself, with the cell's shape,
+        // so closing always shrinks back into this exact cell.
+        .matchedTransitionSource(id: design.id, in: zoom) { source in
+            source.clipShape(RoundedRectangle(cornerRadius: columns >= 2 ? 0 : 12, style: .continuous))
+        }
         .contextMenu {
             Button {
                 design.isFavorite.toggle()
@@ -216,50 +218,4 @@ struct GalleryView: View {
 
 extension DesignKind: Identifiable {
     var id: String { rawValue }
-}
-
-/// A plain (non-lazy) column grid. Unlike Grid rows, every cell keeps its own identity when
-/// designs are inserted or removed, so zoom transition sources are never recreated.
-struct ColumnsLayout: Layout {
-    var columns: Int
-    var spacing: CGFloat
-
-    private func columnWidth(for width: CGFloat) -> CGFloat {
-        max(0, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
-    }
-
-    private func rowHeights(width: CGFloat, subviews: Subviews) -> [CGFloat] {
-        let proposal = ProposedViewSize(width: columnWidth(for: width), height: nil)
-        return stride(from: 0, to: subviews.count, by: columns).map { start in
-            subviews[start..<min(start + columns, subviews.count)]
-                .map { $0.sizeThatFits(proposal).height }
-                .max() ?? 0
-        }
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.replacingUnspecifiedDimensions().width
-        let heights = rowHeights(width: width, subviews: subviews)
-        let height = heights.reduce(0, +) + spacing * CGFloat(max(heights.count - 1, 0))
-        return CGSize(width: width, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let cellWidth = columnWidth(for: bounds.width)
-        let heights = rowHeights(width: bounds.width, subviews: subviews)
-        var y = bounds.minY
-        for (row, height) in heights.enumerated() {
-            for column in 0..<columns {
-                let index = row * columns + column
-                guard index < subviews.count else { break }
-                let x = bounds.minX + CGFloat(column) * (cellWidth + spacing)
-                subviews[index].place(
-                    at: CGPoint(x: x, y: y),
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(width: cellWidth, height: height)
-                )
-            }
-            y += height + spacing
-        }
-    }
 }
