@@ -5,24 +5,33 @@ import UIKit
 final class LocalImageCache: @unchecked Sendable {
     static let shared = LocalImageCache()
 
-    private let cache = NSCache<NSString, UIImage>()
+    /// Grid-sized and full-size images live in separate caches: a full-size pair opened on the
+    /// detail screen is ~100 MB and would otherwise push every grid thumbnail out, so going back
+    /// showed the thumbnails reloading (a flash) right under the zoom transition.
+    private let thumbnails = NSCache<NSString, UIImage>()
+    private let fullSize = NSCache<NSString, UIImage>()
 
     private init() {
-        cache.totalCostLimit = 150 * 1024 * 1024
+        thumbnails.totalCostLimit = 120 * 1024 * 1024
+        fullSize.totalCostLimit = 120 * 1024 * 1024
     }
 
-    func cached(_ key: String) -> UIImage? {
-        cache.object(forKey: key as NSString)
+    private func cache(for maxPixelSize: CGFloat) -> NSCache<NSString, UIImage> {
+        maxPixelSize > 2000 ? fullSize : thumbnails
+    }
+
+    func cached(_ key: String, maxPixelSize: CGFloat) -> UIImage? {
+        cache(for: maxPixelSize).object(forKey: key as NSString)
     }
 
     func image(key: String, data: Data, maxPixelSize: CGFloat) async -> UIImage? {
-        if let hit = cached(key) { return hit }
+        if let hit = cached(key, maxPixelSize: maxPixelSize) { return hit }
         let decoded = await Task.detached(priority: .userInitiated) {
             ImageProcessing.downsample(data: data, maxPixelSize: maxPixelSize)
         }.value
         guard let decoded else { return nil }
         let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
-        cache.setObject(decoded, forKey: key as NSString, cost: cost)
+        cache(for: maxPixelSize).setObject(decoded, forKey: key as NSString, cost: cost)
         return decoded
     }
 }
@@ -43,7 +52,7 @@ struct DesignImage: View {
         self.kind = kind
         self.maxPixelSize = maxPixelSize
         self.contentMode = contentMode
-        _image = State(initialValue: LocalImageCache.shared.cached(Self.key(design, kind, maxPixelSize)))
+        _image = State(initialValue: LocalImageCache.shared.cached(Self.key(design, kind, maxPixelSize), maxPixelSize: maxPixelSize))
     }
 
     var body: some View {
