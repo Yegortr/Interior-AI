@@ -264,6 +264,19 @@ struct DesignGrid: UIViewRepresentable {
             collectionView.contentOffset = CGPoint(x: collectionView.contentOffset.x, y: clamped)
         }
 
+        private func transitionEnded(completed: Bool) {
+            if completed, let target = targetColumns {
+                currentColumns = target
+                parent.columnCount = target
+                reconfigureVisibleCells()
+            }
+            (collectionView?.collectionViewLayout as? GridLayout)?.anchor = nil
+            transitionLayout = nil
+            targetColumns = nil
+            isFinishing = false
+            if !completed { anchor = nil }
+        }
+
         // MARK: Sizing
 
         func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
