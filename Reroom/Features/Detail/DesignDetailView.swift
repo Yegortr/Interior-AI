@@ -135,7 +135,9 @@ struct DesignDetailView: View {
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .matchedTransitionSource(id: "hero", in: heroNamespace)
+            .matchedTransitionSource(id: "hero", in: heroNamespace) { source in
+                source.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
             .accessibilityLabel("Open full screen")
             .transition(.opacity)
         }

@@ -36,7 +36,8 @@ struct DesignCard: View {
             }
             .animation(.smooth, value: design.statusRaw)
             .animation(.smooth, value: design.isFavorite)
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .clipped()
+            .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(design.styleTitle) \(design.subjectTitle)")
             .accessibilityAddTraits(.isButton)

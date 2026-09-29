@@ -112,9 +112,13 @@ struct GalleryView: View {
     private func cell(_ design: Design, columns: Int) -> some View {
         NavigationLink(value: design) {
             DesignCard(design: design, columns: columns)
-                .matchedTransitionSource(id: design.id, in: zoom)
         }
         .buttonStyle(.plain)
+        // As in Apple's sample code: the zoom source is the link itself, with the cell's shape,
+        // so closing always shrinks back into this exact cell.
+        .matchedTransitionSource(id: design.id, in: zoom) { source in
+            source.clipShape(RoundedRectangle(cornerRadius: columns >= 2 ? 0 : 12, style: .continuous))
+        }
         .contextMenu {
             Button {
                 design.isFavorite.toggle()

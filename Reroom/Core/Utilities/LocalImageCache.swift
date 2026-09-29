@@ -57,6 +57,12 @@ struct DesignImage: View {
                 Rectangle().fill(.quaternary)
             }
         }
+        // A `.fill` image is larger than its frame. Keep it inside the proposed size and never let
+        // it take touches: clipping hides overflow but does NOT shrink the hit area, so an
+        // overflowing image would catch taps meant for the neighbouring cell.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .allowsHitTesting(false)
         .task(id: Self.key(design, kind, maxPixelSize)) { await load() }
     }
 
