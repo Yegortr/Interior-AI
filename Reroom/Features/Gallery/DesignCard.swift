@@ -16,7 +16,7 @@ struct DesignCard: View {
             .aspectRatio(ratio, contentMode: .fit)
             .overlay {
                 if design.status == .completed {
-                    DesignImage(design: design, kind: .result, maxPixelSize: isCompact ? 700 : 1400)
+                    DesignImage(design: design, kind: .result, maxPixelSize: isCompact ? 520 : 1200)
                 } else {
                     pending
                 }
