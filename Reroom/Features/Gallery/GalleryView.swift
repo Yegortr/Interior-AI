@@ -114,10 +114,7 @@ struct GalleryView: View {
 
     private func cell(_ design: Design, columns: Int) -> some View {
         NavigationLink(value: design) {
-            DesignCard(design: design, columns: columns)
-                .matchedTransitionSource(id: design.id, in: zoom) { source in
-                    source.clipShape(RoundedRectangle(cornerRadius: columns >= 2 ? 0 : 12, style: .continuous))
-                }
+            DesignCard(design: design, columns: columns, zoomNamespace: zoom)
         }
         .buttonStyle(.plain)
         .contextMenu {

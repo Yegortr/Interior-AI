@@ -6,50 +6,90 @@ import SwiftUI
 struct DesignCard: View {
     let design: Design
     let columns: Int
+    /// When set, the card is the zoom source for the design's detail screen.
+    var zoomNamespace: Namespace.ID?
 
     private var isCompact: Bool { columns == 2 }
+    private var isCompleted: Bool { design.status == .completed }
     private var ratio: CGFloat { isCompact ? AspectRatio.gridCard.value : design.aspectRatio.value }
-    private var cornerRadius: CGFloat { isCompact ? 0 : 12 }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: isCompact ? 0 : 12, style: .continuous) }
 
     var body: some View {
-        Color.clear
-            .aspectRatio(ratio, contentMode: .fit)
+        photo
+            .zoomSource(id: design.id, in: zoomNamespace, shape: shape)
+            // Everything that isn't a plain picture stays OUTSIDE the zoom source. A material,
+            // a shadow or an animated symbol inside a source can keep SwiftUI from matching it,
+            // and the zoom then falls back to growing from / shrinking into the screen centre.
             .overlay {
-                if design.status == .completed {
-                    DesignImage(design: design, kind: .result, maxPixelSize: isCompact ? 520 : 1200)
-                } else {
-                    pending
+                ZStack {
+                    if !isCompleted {
+                        pending.transition(.opacity)
+                    }
                 }
+                .animation(.smooth, value: isCompleted)
             }
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(alignment: .bottomLeading) {
-                // Photos-style glyphs: small, white, shadowed — no chips.
-                HStack(spacing: 6) {
-                    if design.isFavorite { Image(systemName: "heart.fill") }
-                    if design.kind == .garden { Image(systemName: "leaf.fill") }
-                }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.5), radius: 2)
-                .padding(8)
-                .opacity(design.status == .completed ? 1 : 0)
-            }
-            .animation(.smooth, value: design.statusRaw)
-            .animation(.smooth, value: design.isFavorite)
-            .clipped()
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(design.styleTitle) \(design.subjectTitle)")
             .accessibilityAddTraits(.isButton)
     }
 
+    /// The zoom source: the picture (the result, or the photo while it's being designed) and
+    /// its badges, clipped — nothing else.
+    private var photo: some View {
+        Color.clear
+            .aspectRatio(ratio, contentMode: .fit)
+            .overlay {
+                DesignImage(
+                    design: design,
+                    kind: isCompleted ? .result : .original,
+                    maxPixelSize: isCompleted ? (isCompact ? 520 : 1200) : 400
+                )
+            }
+            .overlay(alignment: .bottom) {
+                if isCompleted { badges }
+            }
+            .clipShape(shape)
+    }
+
+    /// Photos-style glyphs: small and white over a soft scrim (a gradient, not a shadow).
+    @ViewBuilder
+    private var badges: some View {
+        if design.isFavorite || design.kind == .garden {
+            HStack(spacing: 6) {
+                if design.isFavorite { Image(systemName: "heart.fill") }
+                if design.kind == .garden { Image(systemName: "leaf.fill") }
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                LinearGradient(colors: [.black.opacity(0.4), .clear], startPoint: .bottom, endPoint: .top)
+            }
+        }
+    }
+
+    /// Frosted photo with the status on top, laid over the source.
     private var pending: some View {
         ZStack {
-            DesignImage(design: design, kind: .original, maxPixelSize: 400)
-                .blur(radius: 14)
-            Rectangle().fill(.ultraThinMaterial)
+            Rectangle().fill(.regularMaterial)
             PendingStatusView(design: design, compact: isCompact)
                 .padding(isCompact ? 10 : 20)
+        }
+        .clipShape(shape)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func zoomSource(id: UUID, in namespace: Namespace.ID?, shape: RoundedRectangle) -> some View {
+        if let namespace {
+            matchedTransitionSource(id: id, in: namespace) { source in
+                source.clipShape(shape)
+            }
+        } else {
+            self
         }
     }
 }

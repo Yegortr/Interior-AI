@@ -13,6 +13,8 @@ struct DesignDetailView: View {
     @State private var showViewer = false
     @Namespace private var heroNamespace
     @State private var showMakeChanges = false
+    /// The change asked for in the sheet; submitted once the sheet has gone away.
+    @State private var requestedChange: String?
     @State private var confirmDelete = false
     @State private var saveState: SaveState = .idle
     @State private var saveError: String?
@@ -77,14 +79,15 @@ struct DesignDetailView: View {
         .confirmationDialog("Delete this design?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Design", role: .destructive) {
                 dismiss()
-                // Delete after the pop animation so this screen never reads a deleted model.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { coordinator.delete(design) }
+                // Delete after the zoom back has finished, so this screen never reads a deleted
+                // model and the grid doesn't reflow under the transition.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { coordinator.delete(design) }
             }
         } message: {
             Text("It will be removed from all your devices.")
         }
-        .sheet(isPresented: $showMakeChanges) {
-            MakeChangesSheet(design: design) { dismiss() }
+        .sheet(isPresented: $showMakeChanges, onDismiss: submitRequestedChange) {
+            MakeChangesSheet(design: design) { requestedChange = $0 }
         }
         .navigationDestination(isPresented: $showViewer) {
             if let result {
@@ -255,6 +258,20 @@ struct DesignDetailView: View {
         }
     }
 
+    /// Runs after the Make Changes sheet is fully gone: going back while the sheet is still
+    /// sliding down made the zoom lose its source. The new design is added only once the zoom
+    /// back into the grid has finished, so no cell moves while the transition is looking for it.
+    private func submitRequestedChange() {
+        guard let change = requestedChange else { return }
+        requestedChange = nil
+        let source = design
+        let coordinator = coordinator
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            coordinator.makeChanges(from: source, change: change)
+        }
+    }
+
     private func saveToPhotos() async {
         guard let data = design.resultImageData else { return }
         saveState = .saving
@@ -274,9 +291,9 @@ struct DesignDetailView: View {
 /// Describe a change; a new design is generated from this result.
 struct MakeChangesSheet: View {
     let design: Design
-    var onSubmitted: () -> Void = {}
+    /// Receives the change; the presenter submits it once the sheet is dismissed.
+    let onApply: (String) -> Void
 
-    @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
     @State private var change = ""
     @FocusState private var focused: Bool
@@ -317,16 +334,8 @@ struct MakeChangesSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
-                        let source = design
-                        let request = change
-                        let coordinator = coordinator
+                        onApply(change.trimmingCharacters(in: .whitespacesAndNewlines))
                         dismiss()
-                        onSubmitted()
-                        // Insert the new design only after the zoom back into the grid has finished:
-                        // inserting during it shifts every cell and the transition loses its source.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                            coordinator.makeChanges(from: source, change: request)
-                        }
                     }
                     .fontWeight(.semibold)
                     .disabled(!canApply)
