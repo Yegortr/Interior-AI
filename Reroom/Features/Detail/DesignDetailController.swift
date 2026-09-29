@@ -17,6 +17,9 @@ final class DesignDetailState {
     var mode: Mode = .design
     var saveState: SaveState = .idle
     var saveError: String?
+    /// Everything below the picture. Added once the zoom has landed, so the first frame of the
+    /// zoom only has to build the picture and the push starts the instant the finger lifts.
+    var showsDetails = false
 }
 
 /// The design page, pushed from the grid with the zoom. SwiftUI draws the content
@@ -126,6 +129,9 @@ final class DesignDetailController: SpineHostingController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if !state.showsDetails {
+            withAnimation(.easeOut(duration: 0.2)) { state.showsDetails = true }
+        }
         removeEndpointCover()
         router?.designScreenDidAppear(self)
     }

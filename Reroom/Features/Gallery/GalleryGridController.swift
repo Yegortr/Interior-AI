@@ -389,6 +389,20 @@ final class GalleryGridController: UIViewController, UICollectionViewDelegate, U
     private func touchDown(at point: CGPoint) {
         tapDuringReflow = isReflowing
         drawnTapID = tapDuringReflow ? drawnDesign(at: point) : nil
+        if !tapDuringReflow { prepareDesign(at: point) }
+    }
+
+    /// A finger resting on a cell is most likely a tap: build that design's screen while it is
+    /// down (a tap lasts ~100 ms), unless it has turned into a scroll by then.
+    private func prepareDesign(at point: CGPoint) {
+        guard let indexPath = collectionView.indexPathForItem(at: point),
+              let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            guard let self, self.collectionView.isTracking, !self.collectionView.isDragging,
+                  !self.collectionView.isDecelerating,
+                  let design = self.designsByID[id], !design.isDeleted, design.modelContext != nil else { return }
+            self.router?.prepareDesign(design)
+        }
     }
 
     private func drawnDesign(at point: CGPoint) -> UUID? {
@@ -558,6 +572,7 @@ final class GalleryGridController: UIViewController, UICollectionViewDelegate, U
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        router?.discardPreparedDesign()
         isContextMenuActive = false
         queuedOpenID = nil
     }

@@ -20,7 +20,7 @@ struct DesignDetailView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
             } footer: {
-                if design.status == .completed, state.original != nil {
+                if state.showsDetails, design.status == .completed, state.original != nil {
                     Picker("View", selection: $state.mode) {
                         ForEach(DesignDetailState.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
@@ -29,34 +29,36 @@ struct DesignDetailView: View {
                 }
             }
 
-            Section("Details") {
-                if design.kind == .garden {
-                    LabeledContent("Space") { Label("Garden", systemImage: "leaf") }
-                    if let place = design.locationName {
-                        LabeledContent("Location") { Label(place, systemImage: "mappin.and.ellipse") }
+            if state.showsDetails {
+                Section("Details") {
+                    if design.kind == .garden {
+                        LabeledContent("Space") { Label("Garden", systemImage: "leaf") }
+                        if let place = design.locationName {
+                            LabeledContent("Location") { Label(place, systemImage: "mappin.and.ellipse") }
+                        }
+                    } else {
+                        LabeledContent("Room") { Label(design.roomType.title, systemImage: design.roomType.symbol) }
                     }
-                } else {
-                    LabeledContent("Room") { Label(design.roomType.title, systemImage: design.roomType.symbol) }
+                    LabeledContent("Style", value: design.styleTitle)
+                    LabeledContent("Created") {
+                        Text(design.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    }
                 }
-                LabeledContent("Style", value: design.styleTitle)
-                LabeledContent("Created") {
-                    Text(design.createdAt.formatted(date: .abbreviated, time: .shortened))
+
+                if !design.notes.isEmpty {
+                    Section(design.parentId == nil ? "Your Wishes" : "Requested Change") {
+                        Text(design.notes)
+                    }
                 }
-            }
 
-            if !design.notes.isEmpty {
-                Section(design.parentId == nil ? "Your Wishes" : "Requested Change") {
-                    Text(design.notes)
+                if design.kind == .garden {
+                    gardenSections
                 }
-            }
 
-            if design.kind == .garden {
-                gardenSections
-            }
-
-            if let saveError = state.saveError {
-                Section {
-                    Label(saveError, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                if let saveError = state.saveError {
+                    Section {
+                        Label(saveError, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                    }
                 }
             }
         }

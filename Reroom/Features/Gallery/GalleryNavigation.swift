@@ -55,6 +55,8 @@ final class GalleryRouter: NSObject, UINavigationControllerDelegate {
     /// Not `navigationController`: that would clash with the delegate methods' parameter.
     weak var navigation: UINavigationController?
     weak var grid: GalleryGridController?
+    /// A design screen built while the finger is still down (see `prepareDesign`).
+    private var prepared: DesignDetailController?
 
     init(generation: GenerationCoordinator, modelContext: ModelContext, chrome: GalleryChrome) {
         self.generation = generation
@@ -78,6 +80,24 @@ final class GalleryRouter: NSObject, UINavigationControllerDelegate {
 
     // MARK: Grid → design (zoom)
 
+    /// Builds and lays out the design screen on touch-down, so that on touch-up the zoom starts
+    /// at once instead of first waiting for SwiftUI to build the page.
+    func prepareDesign(_ design: Design) {
+        guard prepared?.designID != design.id, let navigation, let grid,
+              navigation.topViewController === grid, navigation.transitionCoordinator == nil,
+              !design.isDeleted, design.modelContext != nil else { return }
+        let detail = DesignDetailController(design: design, router: self)
+        detail.loadViewIfNeeded()
+        detail.view.frame = navigation.view.bounds
+        detail.view.layoutIfNeeded()
+        prepared = detail
+    }
+
+    /// The touch turned into a scroll: the prepared screen won't be opened.
+    func discardPreparedDesign() {
+        prepared = nil
+    }
+
     func openDesign(_ design: Design, from grid: GalleryGridController) {
         guard let navigation, navigation.topViewController === grid else { return }
         // Whatever the previous design queued for the grid (Delete, Make Changes) runs now, so it
@@ -85,7 +105,8 @@ final class GalleryRouter: NSObject, UINavigationControllerDelegate {
         grid.runReturnActionsNow()
         guard !design.isDeleted, design.modelContext != nil else { return }
         let id = design.id
-        let detail = DesignDetailController(design: design, router: self)
+        let detail = prepared.flatMap { $0.designID == id ? $0 : nil } ?? DesignDetailController(design: design, router: self)
+        prepared = nil
         let options = UIViewController.Transition.ZoomOptions()
         // Photos-style: line the page's picture up with the cell, cropped to the cell's shape, so
         // what shrinks into the cell is exactly the cell's picture — not the white list around it.
