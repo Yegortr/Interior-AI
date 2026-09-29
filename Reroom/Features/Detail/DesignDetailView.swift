@@ -2,10 +2,9 @@ import SwiftUI
 
 struct DesignDetailView: View {
     let design: Design
-    /// Zooms the screen back into its grid cell; the completion runs once it's back.
-    let close: (_ completion: (() -> Void)?) -> Void
 
     @Environment(GenerationCoordinator.self) private var coordinator
+    @Environment(\.dismiss) private var dismiss
 
     @State private var mode: Mode = .design
     @State private var result: UIImage?
@@ -77,21 +76,15 @@ struct DesignDetailView: View {
         .toolbar { toolbar }
         .confirmationDialog("Delete this design?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Design", role: .destructive) {
-                let coordinator = coordinator
-                let doomed = design
-                // Delete once back in the grid, so this screen never reads a deleted model.
-                close { coordinator.delete(doomed) }
+                dismiss()
+                // Delete after the pop animation so this screen never reads a deleted model.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { coordinator.delete(design) }
             }
         } message: {
             Text("It will be removed from all your devices.")
         }
         .sheet(isPresented: $showMakeChanges) {
-            MakeChangesSheet(design: design) { change in
-                let coordinator = coordinator
-                let source = design
-                // Back to the grid first; the new design appears once the zoom has landed.
-                close { _ = coordinator.makeChanges(from: source, change: change) }
-            }
+            MakeChangesSheet(design: design) { dismiss() }
         }
         .navigationDestination(isPresented: $showViewer) {
             if let result {
@@ -281,9 +274,9 @@ struct DesignDetailView: View {
 /// Describe a change; a new design is generated from this result.
 struct MakeChangesSheet: View {
     let design: Design
-    /// Receives the requested change.
-    let onApply: (String) -> Void
+    var onSubmitted: () -> Void = {}
 
+    @Environment(GenerationCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
     @State private var change = ""
     @FocusState private var focused: Bool
@@ -324,8 +317,16 @@ struct MakeChangesSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
-                        onApply(change.trimmingCharacters(in: .whitespacesAndNewlines))
+                        let source = design
+                        let request = change
+                        let coordinator = coordinator
                         dismiss()
+                        onSubmitted()
+                        // Insert the new design only after the zoom back into the grid has finished:
+                        // inserting during it shifts every cell and the transition loses its source.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                            coordinator.makeChanges(from: source, change: request)
+                        }
                     }
                     .fontWeight(.semibold)
                     .disabled(!canApply)

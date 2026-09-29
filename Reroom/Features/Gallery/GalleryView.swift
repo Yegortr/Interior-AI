@@ -6,7 +6,6 @@ import SwiftUI
 struct GalleryView: View {
     @Query(sort: \Design.createdAt, order: .reverse) private var designs: [Design]
     @Environment(GenerationCoordinator.self) private var coordinator
-    @Environment(\.modelContext) private var modelContext
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("gallery.columnCount") private var columnCount = 2
 
@@ -14,6 +13,7 @@ struct GalleryView: View {
     @State private var creating: DesignKind?
     @State private var showSettings = false
     @State private var designToDelete: Design?
+    @Namespace private var zoom
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All Designs", rooms = "Rooms", gardens = "Gardens", favorites = "Favorites"
@@ -44,17 +44,19 @@ struct GalleryView: View {
                 if visible.isEmpty {
                     emptyState
                 } else {
-                    DesignGrid(
-                        designs: visible,
-                        columns: columnCount,
-                        generation: coordinator,
-                        modelContext: modelContext
-                    ) { designToDelete = $0 }
-                    .ignoresSafeArea()
+                    ScrollView {
+                        grid
+                    }
                 }
             }
             .navigationTitle(filter == .all ? "Reroom" : filter.rawValue)
             .toolbar { toolbar }
+            // Pushed screens own a bottom bar; make sure it never lingers on the grid after going back.
+            .toolbar(.hidden, for: .bottomBar)
+            .navigationDestination(for: Design.self) { design in
+                DesignDetailView(design: design)
+                    .navigationTransition(.zoom(sourceID: design.id, in: zoom))
+            }
             .fullScreenCover(item: $creating) { kind in
                 switch kind {
                 case .interior: CreateFlowView()
@@ -85,6 +87,62 @@ struct GalleryView: View {
             .sensoryFeedback(.selection, trigger: columnCount)
             // A new design appearing = a generation just started.
             .sensoryFeedback(.success, trigger: designs.count) { old, new in new > old }
+        }
+    }
+
+    // MARK: Grid
+
+    @ViewBuilder
+    private var grid: some View {
+        if columnCount == 2 {
+            // Photos-style: edge to edge, hairline gutters.
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)], spacing: 2) {
+                ForEach(visible) { cell($0, columns: 2) }
+            }
+            .animation(.smooth, value: visible.map(\.id))
+        } else {
+            LazyVStack(spacing: 16) {
+                ForEach(visible) { cell($0, columns: 1) }
+            }
+            .padding(.horizontal)
+            .animation(.smooth, value: visible.map(\.id))
+        }
+    }
+
+    private func cell(_ design: Design, columns: Int) -> some View {
+        NavigationLink(value: design) {
+            DesignCard(design: design, columns: columns)
+        }
+        .buttonStyle(.plain)
+        // As in Apple's sample code: the zoom source is the link itself, with the cell's shape,
+        // so closing always shrinks back into this exact cell.
+        .matchedTransitionSource(id: design.id, in: zoom) { source in
+            source.clipShape(RoundedRectangle(cornerRadius: columns >= 2 ? 0 : 12, style: .continuous))
+        }
+        .contextMenu {
+            Button {
+                design.isFavorite.toggle()
+            } label: {
+                design.isFavorite
+                    ? Label("Unfavorite", systemImage: "heart.slash")
+                    : Label("Favorite", systemImage: "heart")
+            }
+            if design.isRetryable {
+                Button {
+                    coordinator.retry(design)
+                } label: {
+                    Label("Try Again", systemImage: "arrow.clockwise")
+                }
+            }
+            Divider()
+            Button(role: .destructive) {
+                designToDelete = design
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        } preview: {
+            DesignCard(design: design, columns: 1)
+                .frame(width: 300)
         }
     }
 
