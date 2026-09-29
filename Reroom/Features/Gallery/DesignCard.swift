@@ -8,9 +8,10 @@ struct DesignCard: View {
     let columns: Int
 
     private var isCompact: Bool { columns >= 2 }
-    /// 3–4 columns: cells are small, so only the status symbol is shown.
-    private var isTiny: Bool { columns >= 3 }
-    private var ratio: CGFloat { isCompact ? AspectRatio.gridCard.value : design.aspectRatio.value }
+    /// 5 columns: cells are small, so only the status symbol is shown.
+    private var isTiny: Bool { columns >= 5 }
+    /// Grid cells are square like Photos; one-up uses the design's own ratio.
+    private var ratio: CGFloat { isCompact ? 1 : design.aspectRatio.value }
     private var cornerRadius: CGFloat { isCompact ? 0 : 12 }
 
     var body: some View {

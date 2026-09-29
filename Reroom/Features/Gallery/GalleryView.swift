@@ -7,7 +7,7 @@ struct GalleryView: View {
     @Query(sort: \Design.createdAt, order: .reverse) private var designs: [Design]
     @Environment(GenerationCoordinator.self) private var coordinator
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
-    @AppStorage("gallery.columnCount") private var columnCount = 2
+    @AppStorage("gallery.columnCount") private var columnCount = 3
 
     @State private var path: [Design] = []
     @State private var filter: Filter = .all
@@ -108,10 +108,9 @@ struct GalleryView: View {
                 }
                 Section("View As") {
                     Picker("View As", selection: $columnCount.animation(.smooth)) {
-                        Label("List", systemImage: "rectangle.grid.1x2").tag(1)
-                        Label("Large Grid", systemImage: "square.grid.2x2").tag(2)
+                        Label("One Up", systemImage: "rectangle.grid.1x2").tag(1)
                         Label("Grid", systemImage: "square.grid.3x3").tag(3)
-                        Label("Small Grid", systemImage: "square.grid.4x3.fill").tag(4)
+                        Label("Small Grid", systemImage: "square.grid.4x3.fill").tag(5)
                     }
                 }
                 Divider()
