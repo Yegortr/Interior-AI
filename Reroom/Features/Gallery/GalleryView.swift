@@ -14,6 +14,15 @@ struct GalleryView: View {
     @State private var showSettings = false
     @State private var designToDelete: Design?
     @Namespace private var zoom
+    /// Live pinch on the grid (Photos-style): scale + where the fingers started.
+    @GestureState private var pinch = Pinch()
+
+    struct Pinch {
+        var scale: CGFloat = 1
+        var anchor: UnitPoint = .center
+    }
+
+    static let columnRange = 1...4
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All Designs", rooms = "Rooms", gardens = "Gardens", favorites = "Favorites"
@@ -46,7 +55,9 @@ struct GalleryView: View {
                 } else {
                     ScrollView {
                         grid
+                            .scaleEffect(liveScale, anchor: pinch.anchor)
                     }
+                    .simultaneousGesture(pinchGesture)
                 }
             }
             .navigationTitle(filter == .all ? "Reroom" : filter.rawValue)
@@ -94,10 +105,10 @@ struct GalleryView: View {
 
     @ViewBuilder
     private var grid: some View {
-        if columnCount == 2 {
+        if columnCount >= 2 {
             // Photos-style: edge to edge, hairline gutters.
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)], spacing: 2) {
-                ForEach(visible) { cell($0, columns: 2) }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columnCount), spacing: 2) {
+                ForEach(visible) { cell($0, columns: columnCount) }
             }
             .animation(.smooth, value: visible.map(\.id))
         } else {
@@ -107,6 +118,38 @@ struct GalleryView: View {
             .padding(.horizontal)
             .animation(.smooth, value: visible.map(\.id))
         }
+    }
+
+    // MARK: Pinch to zoom (like Photos)
+
+    /// Follows the fingers while pinching; at the ends of the range it only gives a little
+    /// (rubber band), then the grid snaps to the new column count when the fingers lift.
+    private var liveScale: CGFloat {
+        let raw = pinch.scale
+        let atMax = columnCount == Self.columnRange.lowerBound && raw > 1   // can't get bigger
+        let atMin = columnCount == Self.columnRange.upperBound && raw < 1   // can't get smaller
+        let damped = (atMax || atMin) ? 1 + (raw - 1) * 0.15 : raw
+        return min(max(damped, 0.75), 1.3)
+    }
+
+    private var pinchGesture: some Gesture {
+        MagnifyGesture()
+            .updating($pinch) { value, state, _ in
+                state = Pinch(scale: value.magnification, anchor: value.startAnchor)
+            }
+            .onEnded { value in
+                let next: Int
+                if value.magnification > 1.12 {
+                    next = columnCount - 1          // spread fingers → bigger, fewer columns
+                } else if value.magnification < 0.9 {
+                    next = columnCount + 1          // pinch in → smaller, more columns
+                } else {
+                    return
+                }
+                let clamped = min(max(next, Self.columnRange.lowerBound), Self.columnRange.upperBound)
+                guard clamped != columnCount else { return }
+                withAnimation(.smooth(duration: 0.35)) { columnCount = clamped }
+            }
     }
 
     private func cell(_ design: Design, columns: Int) -> some View {
@@ -153,8 +196,10 @@ struct GalleryView: View {
                 }
                 Section("View As") {
                     Picker("View As", selection: $columnCount.animation(.smooth)) {
-                        Label("Grid", systemImage: "square.grid.2x2").tag(2)
                         Label("List", systemImage: "rectangle.grid.1x2").tag(1)
+                        Label("Large Grid", systemImage: "square.grid.2x2").tag(2)
+                        Label("Grid", systemImage: "square.grid.3x3").tag(3)
+                        Label("Small Grid", systemImage: "square.grid.4x3.fill").tag(4)
                     }
                 }
                 Divider()

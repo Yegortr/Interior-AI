@@ -7,7 +7,9 @@ struct DesignCard: View {
     let design: Design
     let columns: Int
 
-    private var isCompact: Bool { columns == 2 }
+    private var isCompact: Bool { columns >= 2 }
+    /// 3–4 columns: cells are small, so only the status symbol is shown.
+    private var isTiny: Bool { columns >= 3 }
     private var ratio: CGFloat { isCompact ? AspectRatio.gridCard.value : design.aspectRatio.value }
     private var cornerRadius: CGFloat { isCompact ? 0 : 12 }
 
@@ -16,7 +18,7 @@ struct DesignCard: View {
             .aspectRatio(ratio, contentMode: .fit)
             .overlay {
                 if design.status == .completed {
-                    DesignImage(design: design, kind: .result, maxPixelSize: isCompact ? 700 : 1400)
+                    DesignImage(design: design, kind: .result, maxPixelSize: isTiny ? 400 : (isCompact ? 700 : 1400))
                 } else {
                     pending
                 }
@@ -47,8 +49,8 @@ struct DesignCard: View {
             DesignImage(design: design, kind: .original, maxPixelSize: 400)
                 .blur(radius: 14)
             Rectangle().fill(.ultraThinMaterial)
-            PendingStatusView(design: design, compact: isCompact)
-                .padding(isCompact ? 10 : 20)
+            PendingStatusView(design: design, compact: isCompact, iconOnly: isTiny)
+                .padding(isCompact ? 8 : 20)
         }
     }
 }
@@ -57,10 +59,21 @@ struct DesignCard: View {
 struct PendingStatusView: View {
     let design: Design
     let compact: Bool
+    var iconOnly = false
 
     @Environment(GenerationCoordinator.self) private var coordinator
 
     var body: some View {
+        if iconOnly {
+            icon
+                .font(.title3)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            details
+        }
+    }
+
+    private var details: some View {
         VStack(spacing: compact ? 8 : 12) {
             icon
             Text(title)
