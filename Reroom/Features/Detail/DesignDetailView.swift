@@ -1,35 +1,28 @@
 import SwiftUI
 
+struct DesignDetailActions {
+    var openViewer: () -> Void
+    var openPlant: (Plant) -> Void
+}
+
 struct DesignDetailView: View {
     let design: Design
-
-    @Environment(GenerationCoordinator.self) private var coordinator
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var mode: Mode = .design
-    @State private var result: UIImage?
-    @State private var original: UIImage?
-    /// Pushes the Photos-style viewer, zooming out of the hero image.
-    @State private var showViewer = false
-    @Namespace private var heroNamespace
-    @State private var showMakeChanges = false
-    @State private var confirmDelete = false
-    @State private var saveState: SaveState = .idle
-    @State private var saveError: String?
-
-    private enum Mode: String, CaseIterable { case design = "Design", compare = "Before & After" }
-    private enum SaveState: Equatable { case idle, saving, saved }
+    @Bindable var state: DesignDetailState
+    let heroAnchor: ViewBox
+    let heroImage: ViewBox
+    let actions: DesignDetailActions
 
     var body: some View {
         List {
             Section {
                 hero
+                    .background(ZoomAnchor(box: heroAnchor))     // the zoom lines the grid cell up with this
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
             } footer: {
-                if design.status == .completed, original != nil {
-                    Picker("View", selection: $mode) {
-                        ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                if design.status == .completed, state.original != nil {
+                    Picker("View", selection: $state.mode) {
+                        ForEach(DesignDetailState.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .padding(.top, 12)
@@ -61,41 +54,16 @@ struct DesignDetailView: View {
                 gardenSections
             }
 
-            if let saveError {
+            if let saveError = state.saveError {
                 Section {
                     Label(saveError, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(design.styleTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: Plant.self) { plant in
-            PlantDetailView(plant: plant, locationName: design.locationName)
-        }
-        .toolbar { toolbar }
-        .confirmationDialog("Delete this design?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete Design", role: .destructive) {
-                dismiss()
-                // Delete after the pop animation so this screen never reads a deleted model.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { coordinator.delete(design) }
-            }
-        } message: {
-            Text("It will be removed from all your devices.")
-        }
-        .sheet(isPresented: $showMakeChanges) {
-            MakeChangesSheet(design: design) { dismiss() }
-        }
-        .navigationDestination(isPresented: $showViewer) {
-            if let result {
-                PhotoViewer(design: design, result: result, original: original)
-                    .navigationTransition(.zoom(sourceID: "hero", in: heroNamespace))
-            }
-        }
-        .sensoryFeedback(.selection, trigger: mode)
+        .sensoryFeedback(.selection, trigger: state.mode)
         .sensoryFeedback(.impact(weight: .medium), trigger: design.isFavorite)
-        .sensoryFeedback(.success, trigger: saveState) { _, new in new == .saved }
-        .task(id: design.statusRaw) { await loadImages() }
+        .sensoryFeedback(.success, trigger: state.saveState) { _, new in new == .saved }
     }
 
     // MARK: Hero
@@ -107,37 +75,27 @@ struct DesignDetailView: View {
                 .aspectRatio(design.aspectRatio.value, contentMode: .fit)
                 .overlay {
                     ZStack {
-                        DesignImage(design: design, kind: .original, maxPixelSize: 1200)
-                            .blur(radius: 14)
-                            .opacity(0.45)
+                        if let original = state.original {
+                            Image(uiImage: original).resizable().scaledToFill()
+                                .blur(radius: 14)
+                                .opacity(0.45)
+                        }
                         Rectangle().fill(.ultraThinMaterial)
                         PendingStatusView(design: design, compact: false).padding(24)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        } else if mode == .compare, let result, let original {
+        } else if state.mode == .compare, let result = state.result, let original = state.original {
             BeforeAfterSlider(before: original, after: result, aspectRatio: design.aspectRatio.value)
                 .transition(.opacity)
         } else {
-            Button {
-                showViewer = true
-            } label: {
+            Button(action: actions.openViewer) {
                 Color.clear
                     .aspectRatio(design.aspectRatio.value, contentMode: .fit)
-                    .overlay {
-                        if let result {
-                            Image(uiImage: result).resizable().scaledToFill()
-                        } else {
-                            Rectangle().fill(.quaternary)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay { HeroImage(image: state.result, placeholder: state.placeholder, box: heroImage) }
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-            .matchedTransitionSource(id: "hero", in: heroNamespace) { source in
-                source.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
             .accessibilityLabel("Open full screen")
             .transition(.opacity)
         }
@@ -169,9 +127,18 @@ struct DesignDetailView: View {
         } else {
             Section {
                 ForEach(plants) { plant in
-                    NavigationLink(value: plant) {
-                        PlantRow(plant: plant)
+                    // Pushed by UIKit (the spine); looks and highlights like a NavigationLink row.
+                    Button {
+                        actions.openPlant(plant)
+                    } label: {
+                        HStack {
+                            PlantRow(plant: plant)
+                            Image(systemName: "chevron.forward")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
+                    .tint(.primary)
                 }
             } header: {
                 Text("Plants")
@@ -182,102 +149,15 @@ struct DesignDetailView: View {
             }
         }
     }
-
-    // MARK: Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                if design.isRetryable {
-                    Button { coordinator.retry(design) } label: { Label("Try Again", systemImage: "arrow.clockwise") }
-                }
-                if result != nil {
-                    Button { showViewer = true } label: { Label("View Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") }
-                }
-                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete", systemImage: "trash") }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-        }
-        if design.status == .completed {
-            ToolbarItemGroup(placement: .bottomBar) {
-                Button {
-                    design.isFavorite.toggle()
-                } label: {
-                    Image(systemName: design.isFavorite ? "heart.fill" : "heart")
-                        .contentTransition(.symbolEffect(.replace))
-                        .symbolEffect(.bounce, value: design.isFavorite)
-                }
-                .tint(design.isFavorite ? .pink : nil)
-                .accessibilityLabel(design.isFavorite ? "Unfavorite" : "Favorite")
-
-                Spacer()
-
-                Button {
-                    Task { await saveToPhotos() }
-                } label: {
-                    Image(systemName: saveState == .saved ? "checkmark.circle.fill" : "square.and.arrow.down")
-                        .contentTransition(.symbolEffect(.replace))
-                        .symbolEffect(.pulse, isActive: saveState == .saving)
-                }
-                .disabled(saveState == .saving)
-                .accessibilityLabel("Save to Photos")
-
-                Spacer()
-
-                if let result {
-                    ShareLink(item: Image(uiImage: result), preview: SharePreview("Reroom design", image: Image(uiImage: result)))
-                }
-
-                Spacer()
-
-                Button {
-                    showMakeChanges = true
-                } label: {
-                    Label("Make Changes", systemImage: "wand.and.sparkles")
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-            }
-        }
-    }
-
-    // MARK: Actions
-
-    private func loadImages() async {
-        if let data = design.resultImageData {
-            result = await LocalImageCache.shared.image(key: "\(design.id)-result-full", data: data, maxPixelSize: 3072)
-        }
-        if let data = design.originalImageData {
-            original = await LocalImageCache.shared.image(key: "\(design.id)-original-full", data: data, maxPixelSize: 3072)
-        }
-    }
-
-    private func saveToPhotos() async {
-        guard let data = design.resultImageData else { return }
-        saveState = .saving
-        saveError = nil
-        do {
-            try await PhotoLibrarySaver.save(imageData: data)
-            withAnimation { saveState = .saved }
-            try? await Task.sleep(for: .seconds(2))
-            withAnimation { saveState = .idle }
-        } catch {
-            saveState = .idle
-            saveError = error.localizedDescription
-        }
-    }
 }
 
-/// Describe a change; a new design is generated from this result.
+/// Describe a change; a new design is generated from this result. Presented by UIKit
+/// (medium/large detents); it reports back instead of dismissing itself.
 struct MakeChangesSheet: View {
     let design: Design
-    var onSubmitted: () -> Void = {}
+    let onCancel: () -> Void
+    let onApply: (String) -> Void
 
-    @Environment(GenerationCoordinator.self) private var coordinator
-    @Environment(\.dismiss) private var dismiss
     @State private var change = ""
     @FocusState private var focused: Bool
 
@@ -287,7 +167,7 @@ struct MakeChangesSheet: View {
             : ["Make it brighter", "Swap the sofa for a green velvet one", "Add indoor plants", "Warmer wood tones", "Change wall color to sage"]
     }
 
-    private var canApply: Bool { !change.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var trimmed: String { change.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         NavigationStack {
@@ -313,27 +193,15 @@ struct MakeChangesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", role: .cancel) { dismiss() }
+                    Button("Cancel", role: .cancel, action: onCancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Apply") {
-                        let source = design
-                        let request = change
-                        let coordinator = coordinator
-                        dismiss()
-                        onSubmitted()
-                        // Insert the new design only after the zoom back into the grid has finished:
-                        // inserting during it shifts every cell and the transition loses its source.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                            coordinator.makeChanges(from: source, change: request)
-                        }
-                    }
-                    .fontWeight(.semibold)
-                    .disabled(!canApply)
+                    Button("Apply") { onApply(trimmed) }
+                        .fontWeight(.semibold)
+                        .disabled(trimmed.isEmpty)
                 }
             }
             .onAppear { focused = true }
         }
-        .presentationDetents([.medium, .large])
     }
 }

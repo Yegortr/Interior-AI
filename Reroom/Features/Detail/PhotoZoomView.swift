@@ -9,17 +9,22 @@ import UIKit
 ///   interactive swipe-down-to-close
 struct PhotoZoomView: UIViewRepresentable {
     let image: UIImage
+    /// Hands the scroll view to the viewer controller (zoom alignment, swipe-down at 1× only).
+    var box: ViewBox? = nil
     var onTap: () -> Void = {}
     var onPress: (Bool) -> Void = { _ in }
 
     func makeUIView(context: Context) -> PhotoZoomScrollView {
-        PhotoZoomScrollView()
+        let view = PhotoZoomScrollView()
+        box?.view = view
+        return view
     }
 
     func updateUIView(_ view: PhotoZoomScrollView, context: Context) {
         view.onTap = onTap
         view.onPress = onPress
         view.setImage(image)
+        box?.view = view
     }
 }
 
@@ -64,9 +69,24 @@ final class PhotoZoomScrollView: UIScrollView, UIScrollViewDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    var isAtMinimumZoom: Bool { zoomScale <= minimumZoomScale + 0.01 }
+
+    /// Where the picture is drawn, in `target`'s coordinates.
+    func imageFrame(in target: UIView) -> CGRect? {
+        guard imageView.image != nil, imageView.bounds.width > 0, imageView.bounds.height > 0 else { return nil }
+        return imageView.convert(imageView.bounds, to: target)
+    }
+
     func setImage(_ image: UIImage) {
         guard image !== imageView.image else { return }
+        let previous = imageView.image
         imageView.image = image
+        // The same picture at another resolution (the full-size decode arriving) or an original of
+        // the same shape: keep the frame and the user's zoom. Anything else re-fits at 1×.
+        if let previous, previous.size.height > 0, image.size.height > 0, imageView.bounds.width > 0,
+           abs(previous.size.width / previous.size.height - image.size.width / image.size.height) < 0.01 {
+            return
+        }
         setZoomScale(minimumZoomScale, animated: false)
         layoutImage()
     }
