@@ -14,13 +14,12 @@ struct GalleryView: View {
     @State private var showSettings = false
     @State private var designToDelete: Design?
     @Namespace private var zoom
-    /// Live pinch on the grid (Photos-style): scale + where the fingers started.
-    @GestureState private var pinch = Pinch()
-
-    struct Pinch {
-        var scale: CGFloat = 1
-        var anchor: UnitPoint = .center
-    }
+    // Pinch to zoom (Photos-style). The column count changes *during* the gesture when a
+    // threshold is crossed; in between, the grid follows the fingers.
+    @State private var pinchScale: CGFloat = 1
+    @State private var pinchBase: CGFloat = 1
+    @State private var pinchAnchor: UnitPoint = .center
+    @State private var isPinching = false
 
     static let columnRange = 1...4
 
@@ -55,8 +54,11 @@ struct GalleryView: View {
                 } else {
                     ScrollView {
                         grid
-                            .scaleEffect(liveScale, anchor: pinch.anchor)
+                            .scaleEffect(pinchScale, anchor: pinchAnchor)
+                            // Lifting two fingers must never "tap" the cell underneath.
+                            .allowsHitTesting(!isPinching)
                     }
+                    .scrollDisabled(isPinching)
                     .simultaneousGesture(pinchGesture)
                 }
             }
@@ -122,33 +124,46 @@ struct GalleryView: View {
 
     // MARK: Pinch to zoom (like Photos)
 
-    /// Follows the fingers while pinching; at the ends of the range it only gives a little
-    /// (rubber band), then the grid snaps to the new column count when the fingers lift.
-    private var liveScale: CGFloat {
-        let raw = pinch.scale
-        let atMax = columnCount == Self.columnRange.lowerBound && raw > 1   // can't get bigger
-        let atMin = columnCount == Self.columnRange.upperBound && raw < 1   // can't get smaller
-        let damped = (atMax || atMin) ? 1 + (raw - 1) * 0.15 : raw
-        return min(max(damped, 0.75), 1.3)
-    }
+    private static let layoutSpring = Animation.spring(duration: 0.32, bounce: 0)
 
     private var pinchGesture: some Gesture {
-        MagnifyGesture()
-            .updating($pinch) { value, state, _ in
-                state = Pinch(scale: value.magnification, anchor: value.startAnchor)
-            }
-            .onEnded { value in
-                let next: Int
-                if value.magnification > 1.12 {
-                    next = columnCount - 1          // spread fingers → bigger, fewer columns
-                } else if value.magnification < 0.9 {
-                    next = columnCount + 1          // pinch in → smaller, more columns
-                } else {
+        MagnifyGesture(minimumScaleDelta: 0.005)
+            .onChanged { value in
+                if !isPinching {
+                    isPinching = true
+                    pinchBase = 1
+                    pinchAnchor = value.startAnchor
+                }
+                let relative = value.magnification / pinchBase
+
+                // Crossing a threshold switches the layout right away, like Photos.
+                if relative > 1.22, columnCount > Self.columnRange.lowerBound {
+                    pinchBase = value.magnification
+                    withAnimation(Self.layoutSpring) {
+                        columnCount -= 1          // spread → bigger, fewer columns
+                        pinchScale = 1
+                    }
                     return
                 }
-                let clamped = min(max(next, Self.columnRange.lowerBound), Self.columnRange.upperBound)
-                guard clamped != columnCount else { return }
-                withAnimation(.smooth(duration: 0.35)) { columnCount = clamped }
+                if relative < 0.82, columnCount < Self.columnRange.upperBound {
+                    pinchBase = value.magnification
+                    withAnimation(Self.layoutSpring) {
+                        columnCount += 1          // pinch in → smaller, more columns
+                        pinchScale = 1
+                    }
+                    return
+                }
+
+                // Follow the fingers; rubber-band at the ends of the range.
+                let atLargest = columnCount == Self.columnRange.lowerBound && relative > 1
+                let atSmallest = columnCount == Self.columnRange.upperBound && relative < 1
+                let resistance: CGFloat = (atLargest || atSmallest) ? 0.15 : 0.6
+                pinchScale = 1 + (relative - 1) * resistance
+            }
+            .onEnded { _ in
+                withAnimation(Self.layoutSpring) { pinchScale = 1 }
+                // Keep taps off until the fingers have fully left and the spring settled.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { isPinching = false }
             }
     }
 
