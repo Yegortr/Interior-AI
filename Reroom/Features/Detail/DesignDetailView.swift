@@ -317,9 +317,16 @@ struct MakeChangesSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
-                        coordinator.makeChanges(from: design, change: change)
-                                        dismiss()
+                        let source = design
+                        let request = change
+                        let coordinator = coordinator
+                        dismiss()
                         onSubmitted()
+                        // Insert the new design only after the zoom back into the grid has finished:
+                        // inserting during it shifts every cell and the transition loses its source.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                            coordinator.makeChanges(from: source, change: request)
+                        }
                     }
                     .fontWeight(.semibold)
                     .disabled(!canApply)
