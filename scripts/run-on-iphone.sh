@@ -151,11 +151,14 @@ else
 fi
 
 # 5. Сборка --------------------------------------------------------------------
+# Release: оптимизированная сборка, как в App Store. Debug заметно медленнее (задержки при
+# открытии экранов). Для отладки: CONFIG=Debug ./scripts/run-on-iphone.sh
+CONFIG="${CONFIG:-Release}"
 build() {
   xcodebuild \
     -project Reroom.xcodeproj \
     -scheme Reroom \
-    -configuration Debug \
+    -configuration "$CONFIG" \
     -destination "id=$DEST_ID" \
     -derivedDataPath build/DerivedData \
     -allowProvisioningUpdates \
@@ -186,7 +189,7 @@ if ! grep -q "BUILD SUCCEEDED" "$LOG"; then
   fail "Сборка не удалась. Полный лог: $LOG"
 fi
 
-if [ "$USE_SIMULATOR" = 1 ]; then PRODUCTS_DIR=Debug-iphonesimulator; else PRODUCTS_DIR=Debug-iphoneos; fi
+if [ "$USE_SIMULATOR" = 1 ]; then PRODUCTS_DIR=$CONFIG-iphonesimulator; else PRODUCTS_DIR=$CONFIG-iphoneos; fi
 APP="build/DerivedData/Build/Products/$PRODUCTS_DIR/Reroom.app"
 [ -d "$APP" ] || fail "Не найден собранный $APP"
 
