@@ -197,7 +197,8 @@ APP="build/DerivedData/Build/Products/$PRODUCTS_DIR/Reroom.app"
 if [ "$USE_SIMULATOR" = 1 ]; then
   step "Запускаю в $DEST_NAME"
   xcrun simctl boot "$DEST_ID" 2>/dev/null || true
-  open -a Simulator
+  # Simulator.app лежит внутри Xcode; `open -a Simulator` не всегда находит его (Xcode 27).
+  open -a Simulator 2>/dev/null || open "$(xcode-select -p)/Applications/Simulator.app" 2>/dev/null || true
   xcrun simctl bootstatus "$DEST_ID" -b >/dev/null 2>&1 || true
   xcrun simctl install "$DEST_ID" "$APP"
   xcrun simctl launch "$DEST_ID" "$BUNDLE_ID" >/dev/null
