@@ -7,9 +7,8 @@ struct GalleryView: View {
     @Query(sort: \Design.createdAt, order: .reverse) private var designs: [Design]
     @Environment(GenerationCoordinator.self) private var coordinator
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
-    @AppStorage("gallery.columnCount") private var columnCount = 3
+    @AppStorage("gallery.columnCount") private var columnCount = 2
 
-    @State private var path: [Design] = []
     @State private var filter: Filter = .all
     @State private var creating: DesignKind?
     @State private var showSettings = false
@@ -40,20 +39,14 @@ struct GalleryView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             Group {
                 if visible.isEmpty {
                     emptyState
                 } else {
-                    DesignGrid(
-                        designs: visible,
-                        columnCount: $columnCount,
-                        coordinatorEnvironment: coordinator,
-                        zoomNamespace: zoom,
-                        onSelect: { path.append($0) },
-                        onDelete: { designToDelete = $0 }
-                    )
-                    .ignoresSafeArea(edges: .bottom)
+                    ScrollView {
+                        grid
+                    }
                 }
             }
             .navigationTitle(filter == .all ? "Reroom" : filter.rawValue)
@@ -97,6 +90,58 @@ struct GalleryView: View {
         }
     }
 
+    // MARK: Grid
+
+    @ViewBuilder
+    private var grid: some View {
+        if columnCount == 2 {
+            // Photos-style: edge to edge, hairline gutters.
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)], spacing: 2) {
+                ForEach(visible) { cell($0, columns: 2) }
+            }
+            .animation(.smooth, value: visible.map(\.id))
+        } else {
+            LazyVStack(spacing: 16) {
+                ForEach(visible) { cell($0, columns: 1) }
+            }
+            .padding(.horizontal)
+            .animation(.smooth, value: visible.map(\.id))
+        }
+    }
+
+    private func cell(_ design: Design, columns: Int) -> some View {
+        NavigationLink(value: design) {
+            DesignCard(design: design, columns: columns)
+                .matchedTransitionSource(id: design.id, in: zoom)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                design.isFavorite.toggle()
+            } label: {
+                design.isFavorite
+                    ? Label("Unfavorite", systemImage: "heart.slash")
+                    : Label("Favorite", systemImage: "heart")
+            }
+            if design.isRetryable {
+                Button {
+                    coordinator.retry(design)
+                } label: {
+                    Label("Try Again", systemImage: "arrow.clockwise")
+                }
+            }
+            Divider()
+            Button(role: .destructive) {
+                designToDelete = design
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        } preview: {
+            DesignCard(design: design, columns: 1)
+                .frame(width: 300)
+        }
+    }
+
     // MARK: Toolbar
 
     @ToolbarContentBuilder
@@ -108,9 +153,8 @@ struct GalleryView: View {
                 }
                 Section("View As") {
                     Picker("View As", selection: $columnCount.animation(.smooth)) {
-                        Label("One Up", systemImage: "rectangle.grid.1x2").tag(1)
-                        Label("Grid", systemImage: "square.grid.3x3").tag(3)
-                        Label("Small Grid", systemImage: "square.grid.4x3.fill").tag(5)
+                        Label("Grid", systemImage: "square.grid.2x2").tag(2)
+                        Label("List", systemImage: "rectangle.grid.1x2").tag(1)
                     }
                 }
                 Divider()
