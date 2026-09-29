@@ -9,19 +9,12 @@ struct GalleryView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("gallery.columnCount") private var columnCount = 2
 
+    @State private var path: [Design] = []
     @State private var filter: Filter = .all
     @State private var creating: DesignKind?
     @State private var showSettings = false
     @State private var designToDelete: Design?
     @Namespace private var zoom
-    // Pinch to zoom (Photos-style). The column count changes *during* the gesture when a
-    // threshold is crossed; in between, the grid follows the fingers.
-    @State private var pinchScale: CGFloat = 1
-    @State private var pinchBase: CGFloat = 1
-    @State private var pinchAnchor: UnitPoint = .center
-    @State private var isPinching = false
-
-    static let columnRange = 1...4
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All Designs", rooms = "Rooms", gardens = "Gardens", favorites = "Favorites"
@@ -47,19 +40,20 @@ struct GalleryView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if visible.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        grid
-                            .scaleEffect(pinchScale, anchor: pinchAnchor)
-                            // Lifting two fingers must never "tap" the cell underneath.
-                            .allowsHitTesting(!isPinching)
-                    }
-                    .scrollDisabled(isPinching)
-                    .simultaneousGesture(pinchGesture)
+                    DesignGrid(
+                        designs: visible,
+                        columnCount: $columnCount,
+                        coordinatorEnvironment: coordinator,
+                        zoomNamespace: zoom,
+                        onSelect: { path.append($0) },
+                        onDelete: { designToDelete = $0 }
+                    )
+                    .ignoresSafeArea(edges: .bottom)
                 }
             }
             .navigationTitle(filter == .all ? "Reroom" : filter.rawValue)
@@ -100,103 +94,6 @@ struct GalleryView: View {
             .sensoryFeedback(.selection, trigger: columnCount)
             // A new design appearing = a generation just started.
             .sensoryFeedback(.success, trigger: designs.count) { old, new in new > old }
-        }
-    }
-
-    // MARK: Grid
-
-    @ViewBuilder
-    private var grid: some View {
-        if columnCount >= 2 {
-            // Photos-style: edge to edge, hairline gutters.
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columnCount), spacing: 2) {
-                ForEach(visible) { cell($0, columns: columnCount) }
-            }
-            .animation(.smooth, value: visible.map(\.id))
-        } else {
-            LazyVStack(spacing: 16) {
-                ForEach(visible) { cell($0, columns: 1) }
-            }
-            .padding(.horizontal)
-            .animation(.smooth, value: visible.map(\.id))
-        }
-    }
-
-    // MARK: Pinch to zoom (like Photos)
-
-    private static let layoutSpring = Animation.spring(duration: 0.32, bounce: 0)
-
-    private var pinchGesture: some Gesture {
-        MagnifyGesture(minimumScaleDelta: 0.005)
-            .onChanged { value in
-                if !isPinching {
-                    isPinching = true
-                    pinchBase = 1
-                    pinchAnchor = value.startAnchor
-                }
-                let relative = value.magnification / pinchBase
-
-                // Crossing a threshold switches the layout right away, like Photos.
-                if relative > 1.22, columnCount > Self.columnRange.lowerBound {
-                    pinchBase = value.magnification
-                    withAnimation(Self.layoutSpring) {
-                        columnCount -= 1          // spread → bigger, fewer columns
-                        pinchScale = 1
-                    }
-                    return
-                }
-                if relative < 0.82, columnCount < Self.columnRange.upperBound {
-                    pinchBase = value.magnification
-                    withAnimation(Self.layoutSpring) {
-                        columnCount += 1          // pinch in → smaller, more columns
-                        pinchScale = 1
-                    }
-                    return
-                }
-
-                // Follow the fingers; rubber-band at the ends of the range.
-                let atLargest = columnCount == Self.columnRange.lowerBound && relative > 1
-                let atSmallest = columnCount == Self.columnRange.upperBound && relative < 1
-                let resistance: CGFloat = (atLargest || atSmallest) ? 0.15 : 0.6
-                pinchScale = 1 + (relative - 1) * resistance
-            }
-            .onEnded { _ in
-                withAnimation(Self.layoutSpring) { pinchScale = 1 }
-                // Keep taps off until the fingers have fully left and the spring settled.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { isPinching = false }
-            }
-    }
-
-    private func cell(_ design: Design, columns: Int) -> some View {
-        NavigationLink(value: design) {
-            DesignCard(design: design, columns: columns)
-                .matchedTransitionSource(id: design.id, in: zoom)
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                design.isFavorite.toggle()
-            } label: {
-                design.isFavorite
-                    ? Label("Unfavorite", systemImage: "heart.slash")
-                    : Label("Favorite", systemImage: "heart")
-            }
-            if design.isRetryable {
-                Button {
-                    coordinator.retry(design)
-                } label: {
-                    Label("Try Again", systemImage: "arrow.clockwise")
-                }
-            }
-            Divider()
-            Button(role: .destructive) {
-                designToDelete = design
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        } preview: {
-            DesignCard(design: design, columns: 1)
-                .frame(width: 300)
         }
     }
 
